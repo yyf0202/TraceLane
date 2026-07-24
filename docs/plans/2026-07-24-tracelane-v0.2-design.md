@@ -1,6 +1,6 @@
 # TraceLane v0.2 设计：拿破仑反事实研究与 Harness 诊断闭环
 
-- 状态：待审阅
+- 状态：已批准
 - 日期：2026-07-24
 - 目标版本：v0.2.0
 - 首个用例：`HIST-001`
@@ -130,6 +130,34 @@ Agent 可见证据优先使用决策时点前已经存在的公共领域一手�
 
 现代历史研究可以用于设计 Rubric 和人工校准，但默认不直接进入 Agent 的
 Point-in-Time Context，避免把后见解释伪装成当时可用信息。
+
+#### 5.3.1 Evidence Acquisition Lane
+
+模型本身不直接拥有网络。TraceLane 将“在线找资料”和“使用冻结资料完成评测”分成
+两个运行模式：
+
+```text
+live_research
+  search_web → fetch_url → extract candidate → review → freeze bundle
+
+frozen_eval
+  list_evidence → read_evidence → analyze → grade
+```
+
+`live_research` 是证据采集过程，不产生可与 Benchmark 直接比较的正式得分。每次搜索
+保存 Query、Provider、排名、Result URL 和搜索时间；每次抓取保存最终 URL、HTTP
+元数据、抓取时间、Content Type、字节数、内容哈希和原始 Blob。提取出的 Evidence
+Record 先进入 Candidate 状态，只有通过日期、来源、许可证和内容审核后才能被提升到
+冻结 Evidence Manifest。
+
+`frozen_eval` 默认禁用所有网络工具。它只允许读取 Manifest 明确引用的内容，从而保证
+同一 Evidence Bundle 哈希对应同一组输入。若实时研究结果需要进入 Benchmark，必须
+生成新 Bundle 版本和新哈希，不能静默改变旧 Bundle。
+
+搜索服务通过 `SearchProvider` 接口接入，首个实现使用显式 API 配置；不把某个非正式
+网页抓取技巧当成稳定搜索协议。HTTP Fetcher 限制协议、域名、重定向次数、超时、响应
+大小和 Content Type，并在写入前执行 Secret/PII 扫描。网页内容可能包含 Prompt
+Injection，因此采集文本始终标记为不可信数据，不能变成 Harness 指令。
 
 ### 5.4 历史时间与来源字段
 
@@ -358,6 +386,11 @@ repeat
 `suffix_live` 表示 checkpoint 之前的状态固定，之后重新调用 Runtime。由于模型可能
 具有随机性，TraceLane 不把单次分叉称为严格因果结论。
 
+Runner 在 Context Policy 执行前保存 `evidence_frozen` 根 checkpoint。对于 Context
+修复，Control 与 Treatment 都从同一个根 checkpoint 分叉：Control 应用显式 no-op，
+Treatment 应用唯一获批改动；两条后缀都重新执行，且只通过 parent prefix 哈希引用
+共同前缀，不复制或伪造子 Run 的旧事件。
+
 每个 Control/Treatment 至少重复五次，报告：
 
 - 各指标的均值、范围和逐次结果；
@@ -521,7 +554,8 @@ src/tracelane/schemas/v2/
 ├── grade-report.schema.json
 ├── trajectory-export.schema.json
 ├── preference-export.schema.json
-└── reward-event.schema.json
+├── reward-event.schema.json
+└── migration-manifest.schema.json
 ```
 
 JSON Schema Draft 2020-12 是磁盘和交换格式的权威契约；Python 内部继续使用 frozen
@@ -602,7 +636,9 @@ fixtures/v0.2/
 `development`；最终报告使用预先登记、调参阶段不读取的 `heldout`。开源仓库不能把
 公开文件伪装成秘密测试集，因此这里的 heldout 是实验流程隔离：执行评测前锁定 Commit、
 配置和假设，Runner 不把标签传给 Agent 或 Repair Proposer。即使 v0.2 只有一个案例，
-也先建立这一边界，避免一边看结果一边调 Harness。
+也先建立这一边界，避免一边看结果一边调 Harness。Split 列出的是稳定的
+`scenario_id`（Case + 可选 Fault），而不只是 Case ID；同一历史案例的干净条件、
+开发故障和 heldout 故障可以被分别登记。
 
 `evidence/manifest.json` 是冻结证据包的入口，记录：
 
@@ -725,6 +761,14 @@ Trace 保存可观察行为：模型输入、公开输出、工具调用、工�
 artifacts/
 ├── blobs/
 │   └── sha256/<first-two>/<full-sha256>.<ext>
+├── acquisition/<session-id>/
+│   ├── manifest.json
+│   ├── search-results.jsonl
+│   ├── fetches.jsonl
+│   └── candidates/<candidate-id>.json
+├── imports/v1/<import-id>/
+│   ├── manifest.json
+│   └── payload/...
 ├── runs/<run-id>/
 │   ├── manifest.json
 │   ├── input/
@@ -761,7 +805,9 @@ artifacts/
 Run 全局只保存一次；Experiment Arm 使用 `run-ref.json` 引用 Run，避免复制。同一
 Experiment 的 Control/Treatment/Repeat 由 Manifest 明确列出，不能依赖目录遍历猜测
 实验结构。`checksums.json` 列出 Run 内全部权威文件的相对 URI、大小和 SHA-256；
-`manifest.json` 保存该清单的根哈希，因此复制、压缩或上传后仍能检查完整性。
+`manifest.json` 保存该清单的根哈希，因此复制、压缩或上传后仍能检查完整性。为避免
+循环哈希，`checksums.json` 不包含自身和 `manifest.json`；Manifest 自身通过
+`content_sha256` 校验，并保存 `checksums.json` 的哈希。
 
 `RunManifest` 至少保存：
 
@@ -852,7 +898,9 @@ Comparison
 - 文件继续采用临时文件、`fsync` 和原子替换；
 - Manifest 在发布前校验全部 Ref、Schema、哈希和路径包含关系；
 - 生成的 `catalog.json` 或 SQLite Index 只能作为可重建索引，不能成为唯一事实源；
-- v1 Artifact 继续可读；v2 Reader 负责兼容，迁移器生成新目录而不修改原始 v1 产物；
+- v1 Artifact 继续由现有 v1 Reader 读取；导入器将其逐字节复制到
+  `artifacts/imports/v1/<import-id>/payload/`，生成带来源、大小和哈希的 Migration
+  Manifest，不修改原始 v1 产物，也不把旧答案伪装成原生 v2 Research Report；
 - Markdown 报告中的数字和引用必须能回链到结构化对象 ID。
 
 提供统一的 `validate artifact|run|experiment|suite` 校验入口。校验失败时返回稳定的
@@ -870,10 +918,12 @@ Comparison
 tracelane eval
 tracelane ablate
 tracelane inspect
+tracelane acquire
 tracelane diagnose
 tracelane replay
 tracelane compare
 tracelane export
+tracelane migrate
 ```
 
 第一条端到端演示命令必须能够从 HIST-001 配置生成：
@@ -906,10 +956,11 @@ tracelane export
 ### Week 1：形成可运行的纵向骨架
 
 1. HIST-001 Task/Evidence/Answer 契约；
-2. Trace Event 类型与 Constraint Log；
-3. 历史研究报告结构；
-4. 硬性 Graders 与 Fault Fixtures；
-5. First Critical Failure 诊断。
+2. Evidence Acquisition 接口、受限网络工具与冻结入口；
+3. Trace Event 类型与 Constraint Log；
+4. 历史研究报告结构；
+5. 硬性 Graders 与 Fault Fixtures；
+6. First Critical Failure 诊断。
 
 ### Week 2：闭合实验
 
