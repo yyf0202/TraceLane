@@ -222,7 +222,8 @@ def _validate_schema(name: str, value: Mapping[str, object]) -> None:
     schema_path = files("tracelane").joinpath("schemas", f"{name}.schema.json")
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = Draft202012Validator(schema)
-    errors = sorted(validator.iter_errors(value), key=lambda error: list(error.path))
+    normalized = json.loads(canonical_json(value))
+    errors = sorted(validator.iter_errors(normalized), key=lambda error: list(error.path))
     if not errors:
         return
     first = errors[0]

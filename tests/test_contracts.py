@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+from types import MappingProxyType
 
 import pytest
 
@@ -46,6 +47,10 @@ ANSWER = {
     ],
     "missing_information": [],
 }
+
+
+def test_answer_loader_accepts_documented_read_only_mapping() -> None:
+    assert load_answer(MappingProxyType(deepcopy(ANSWER))).answer == "Wetland is preferred."
 
 
 def test_canonical_hash_is_key_order_independent() -> None:
