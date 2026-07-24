@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/fault-fixture/v2",
+  "title": "TraceLane v2 Fault Fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id", "schema_version", "content_sha256", "fault_id",
+    "fault_type", "target", "expected_detection"
+  ],
+  "properties": {
+    "schema_id": {"const": "tracelane://schemas/fault-fixture/v2"},
+    "schema_version": {"const": "2.0.0"},
+    "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "fault_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"},
+    "fault_type": {"type": "string", "minLength": 1},
+    "target": {"type": "string", "minLength": 1},
+    "expected_detection": {"type": "string", "minLength": 1}
+  }
+}

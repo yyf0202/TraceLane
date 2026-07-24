@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/evidence-manifest/v2",
+  "title": "TraceLane v2 Evidence Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "content_sha256",
+    "case_id",
+    "cutoff_at",
+    "record_refs",
+    "rejected_future_refs",
+    "source_licenses",
+    "transformation_refs",
+    "bundle_sha256"
+  ],
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "media_type",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schema_id": {
+          "type": "string",
+          "pattern": "^tracelane://schemas/[a-z0-9][a-z0-9-]*/v[0-9]+$"
+        }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": {
+      "const": "tracelane://schemas/evidence-manifest/v2"
+    },
+    "schema_version": {
+      "const": "2.0.0"
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"
+    },
+    "cutoff_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "record_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/artifact_ref"
+      }
+    },
+    "rejected_future_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact_ref"
+      }
+    },
+    "source_licenses": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "enum": [
+          "Public-Domain",
+          "CC0-1.0",
+          "CC-BY-4.0",
+          "CC-BY-SA-4.0",
+          "LicenseRef-Research-Excerpt"
+        ]
+      }
+    },
+    "transformation_refs": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/artifact_ref"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "evidence_transformation"
+              }
+            },
+            "not": {
+              "required": [
+                "schema_id"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "bundle_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

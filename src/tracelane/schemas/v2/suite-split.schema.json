@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/suite-split/v2",
+  "title": "TraceLane v2 Suite Split",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_id", "schema_version", "split", "scenario_ids"],
+  "properties": {
+    "schema_id": {"const": "tracelane://schemas/suite-split/v2"},
+    "schema_version": {"const": "2.0.0"},
+    "split": {"enum": ["development", "heldout"]},
+    "scenario_ids": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{2,127}$"}
+    }
+  }
+}

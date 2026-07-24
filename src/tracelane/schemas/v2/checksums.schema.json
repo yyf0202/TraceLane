@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/checksums/v2",
+  "title": "TraceLane v2 Run Checksums",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "content_sha256",
+    "entries",
+    "root_sha256"
+  ],
+  "properties": {
+    "schema_id": {"const": "tracelane://schemas/checksums/v2"},
+    "schema_version": {"const": "2.0.0"},
+    "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["uri", "size_bytes", "sha256"],
+        "properties": {
+          "uri": {
+            "type": "string",
+            "pattern": "^tracelane://artifacts/runs/[0-9a-f]{64}/[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+          },
+          "size_bytes": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "root_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

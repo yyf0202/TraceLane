@@ -8,33 +8,157 @@ import pytest
 
 from tests.test_contracts import TASK
 from tracelane.artifacts import RunStore
-from tracelane.contracts import HarnessConfig, load_task
+from tracelane.contracts import HarnessConfig, canonical_json, load_task
 from tracelane.runner import run_task
 from tracelane.runtime.stub import DeterministicStubRuntime
-from tracelane.security import assert_safe_tree, redact
+from tracelane.security import assert_safe_tree, classify_and_redact, redact
 from tracelane.tracing import TraceRecorder
+
+
+@pytest.mark.parametrize(
+    ("raw", "forbidden"),
+    [
+        ("token " + "sk-" + "a" * 24, "sk-"),
+        ("https://example.test/?api_key=secret-value", "secret-value"),
+        ("mail me at person@example.test", "person@example.test"),
+        ("call +86 17610768902", "17610768902"),
+        (r"read \\server\share\secret.txt", "server"),
+        ("read C:/Users/name/private.txt", "Users/name"),
+    ],
+)
+def test_redact_removes_sensitive_values_inside_ordinary_strings(
+    raw: str,
+    forbidden: str,
+) -> None:
+    result = classify_and_redact({"note": raw})
+    assert forbidden not in canonical_json(result.value)
+    assert result.payload_classification == "restricted"
+    assert result.redaction_applied is True
+
+
+def test_redact_removes_configured_secret_exactly() -> None:
+    result = classify_and_redact(
+        {"note": "prefix private-runtime-value suffix"},
+        secrets=("private-runtime-value",),
+    )
+    assert result.value == {"note": "prefix [REDACTED] suffix"}
+
+
+@pytest.mark.parametrize(
+    ("raw", "forbidden"),
+    [
+        ("token " + "ghp_" + "a" * 36, "ghp_"),
+        ("key " + "AKIA" + "A" * 16, "AKIA"),
+        ("call +1 (415) 555-2671", "415"),
+        ("https://example.test/?access_token=private-value", "private-value"),
+        ("https://example.test/?client_secret=private-value", "private-value"),
+    ],
+)
+def test_redact_removes_common_credentials_phones_and_query_aliases(
+    raw: str,
+    forbidden: str,
+) -> None:
+    result = classify_and_redact({"note": raw})
+
+    assert forbidden not in canonical_json(result.value)
+    assert result.redaction_applied is True
+
+
+def test_redact_does_not_treat_dates_or_short_numbers_as_phones() -> None:
+    result = classify_and_redact({"note": "1812-05-07 and 555-2671"})
+
+    assert result.value == {"note": "1812-05-07 and 555-2671"}
+    assert result.redaction_applied is False
 
 
 def test_redact_removes_sensitive_keys_and_bearer_values() -> None:
     value = {
-        "api_key": "key-value",
+        "credentials": [
+            {"api_key": "key-value"},
+            {"access_token": "token-value"},
+            {"secret": "secret-value"},
+            {"authorization": "Bearer abc.def.ghi"},
+            {"password": "password-value"},
+        ],
         "nested": {
-            "access_token": "token-value",
-            "secret": "secret-value",
-            "authorization": "Bearer abc.def.ghi",
-            "password": "password-value",
             "message": "request failed with Bearer xyz-123_token",
             "safe": "visible",
         },
     }
     redacted = redact(value)
-    assert redacted["api_key"] == "[REDACTED]"
-    assert redacted["nested"]["access_token"] == "[REDACTED]"
-    assert redacted["nested"]["secret"] == "[REDACTED]"
-    assert redacted["nested"]["authorization"] == "[REDACTED]"
-    assert redacted["nested"]["password"] == "[REDACTED]"
+    assert redacted["credentials"] == [
+        {"[REDACTED]": "[REDACTED]"},
+        {"[REDACTED]": "[REDACTED]"},
+        {"[REDACTED]": "[REDACTED]"},
+        {"[REDACTED]": "[REDACTED]"},
+        {"[REDACTED]": "[REDACTED]"},
+    ]
     assert redacted["nested"]["message"] == "request failed with Bearer [REDACTED]"
     assert redacted["nested"]["safe"] == "visible"
+
+
+def test_classify_and_redact_removes_contact_headers_and_local_paths() -> None:
+    value = {
+        "sensitive_fields": [
+            {"cookie": "session=private"},
+            {"set-cookie": "session=private"},
+            {"email": "person@example.com"},
+            {"phone": "17600000000"},
+            {"local_path": "D:\\private\\evidence.json"},
+        ],
+        "message": ("read C:\\Users\\person\\secret.txt and /home/person/private.json"),
+        "safe": "visible",
+    }
+
+    result = classify_and_redact(value)
+
+    assert result.payload_classification == "restricted"
+    assert result.redaction_applied is True
+    assert result.value["sensitive_fields"] == [
+        {"[REDACTED]": "[REDACTED]"},
+        {"[REDACTED]": "[REDACTED]"},
+        {"[REDACTED]": "[REDACTED]"},
+        {"[REDACTED]": "[REDACTED]"},
+        {"[REDACTED]": "[REDACTED]"},
+    ]
+    assert result.value["message"] == "read [LOCAL_PATH] and [LOCAL_PATH]"
+    assert result.value["safe"] == "visible"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("read /etc/passwd", "read [LOCAL_PATH]"),
+        ("inspect /var/tmp/private.txt", "inspect [LOCAL_PATH]"),
+        ("open /opt/private/file", "open [LOCAL_PATH]"),
+    ],
+)
+def test_classify_and_redact_removes_non_home_posix_absolute_paths(
+    raw: str,
+    expected: str,
+) -> None:
+    result = classify_and_redact({"note": raw})
+
+    assert result.value == {"note": expected}
+    assert result.payload_classification == "restricted"
+    assert result.redaction_applied is True
+
+
+def test_classify_and_redact_does_not_treat_https_url_as_local_path() -> None:
+    url = "https://example.test/etc/passwd"
+
+    result = classify_and_redact({"source_url": url})
+
+    assert result.value == {"source_url": url}
+    assert result.redaction_applied is False
+
+
+def test_classify_and_redact_marks_unchanged_payload_internal() -> None:
+    result = classify_and_redact({"query": "Napoleon 1812"})
+
+    assert result.value == {"query": "Napoleon 1812"}
+    assert result.payload_classification == "internal"
+    assert result.redaction_applied is False
 
 
 def test_safe_tree_rejects_symlink_descendant(tmp_path: Path) -> None:

@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/suite-manifest/v2",
+  "title": "TraceLane v2 Suite Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "content_sha256",
+    "suite_id",
+    "splits",
+    "scenarios"
+  ],
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "media_type",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schema_id": {
+          "type": "string",
+          "pattern": "^tracelane://schemas/[a-z0-9][a-z0-9-]*/v[0-9]+$"
+        }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": {
+      "const": "tracelane://schemas/suite-manifest/v2"
+    },
+    "schema_version": {
+      "const": "2.0.0"
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "suite_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"
+    },
+    "splits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "development",
+        "heldout"
+      ],
+      "properties": {
+        "development": {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        "heldout": {
+          "$ref": "#/$defs/artifact_ref"
+        }
+      }
+    },
+    "scenarios": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scenario_id",
+          "case_id",
+          "case_ref",
+          "evidence_manifest_ref",
+          "fault_ref"
+        ],
+        "properties": {
+          "scenario_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._/-]{2,127}$"
+          },
+          "case_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]{2,63}$"
+          },
+          "case_ref": {
+            "$ref": "#/$defs/artifact_ref"
+          },
+          "evidence_manifest_ref": {
+            "$ref": "#/$defs/artifact_ref"
+          },
+          "fault_ref": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/artifact_ref"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

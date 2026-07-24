@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/acquisition-session/v2",
+  "title": "TraceLane v2 Manual Acquisition Session",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "content_sha256",
+    "session_id",
+    "mode",
+    "created_at",
+    "network_access_available_to_agent",
+    "candidate_refs",
+    "review_refs",
+    "promoted_record_refs"
+  ],
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "media_type",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schema_id": {
+          "type": "string",
+          "pattern": "^tracelane://schemas/[a-z0-9][a-z0-9-]*/v[0-9]+$"
+        }
+      }
+    }
+  },
+  "properties": {
+    "schema_id": {
+      "const": "tracelane://schemas/acquisition-session/v2"
+    },
+    "schema_version": {
+      "const": "2.0.0"
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{2,63}$"
+    },
+    "mode": {
+      "const": "codex_manual"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "network_access_available_to_agent": {
+      "const": false
+    },
+    "candidate_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact_ref"
+      }
+    },
+    "review_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact_ref"
+      }
+    },
+    "promoted_record_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact_ref"
+      }
+    }
+  }
+}

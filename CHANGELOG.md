@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Persisted execution fingerprints bind every v0.2 run to its exact case, evidence, harness, runtime, grader set, code revision, and repeat.
+- Exact checksum closure detects missing, extra, duplicated, or substituted run files.
+- Bound acquisition reviews tie approval to the exact candidate record, curated bytes, source locator, and review metadata.
+- Manifest-last acquisition transactions journal both ingest and promotion, preflight the complete base inventory, and recover interrupted publication without losing inventory.
+- Byte-preserving evidence archives retain promoted record, candidate, review, content, transformation references, URIs, digests, sizes, and exact bytes.
+- Verified historical provenance enforces fixture references, evidence manifests, source licenses, transformations, and decision cutoffs.
+- Trace hash chaining detects event edits, deletion, insertion, reordering, stale writers, and broken causal or parent links.
+- Structural trace identities fail closed when their final serialized values collide with configured secrets.
+- Generic trace metadata and decoded acquisition URLs apply the same configured-secret, credential, personal-data, and absolute-path persistence policy while preserving valid typed SHA-256 identities.
+- Completed run manifests require at least one authenticated output, and frozen history cases are reauthenticated at their public consumption boundary.
+- Candidate identifiers bind query, title, canonical source URL, document date and precision, and curated-content digest; curator and transformation edits remain protected by the candidate-record digest and stale-review checks.
+- Local v1 migration binds the normalized absolute source root, serializes concurrent publication, publishes each file through a create-new boundary, and authenticates completion with a persisted create-new marker over the copied inventory.
+- Lock files are reauthenticated after OS acquisition and before unlock, and acquisition journals use identity-bound tombstone retirement instead of raw pathname deletion.
+
 ## [0.1.0] - 2026-07-24
 
 ### Added

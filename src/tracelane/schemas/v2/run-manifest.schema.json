@@ -1,0 +1,504 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/run-manifest/v2",
+  "title": "TraceLane v2 Run Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "content_sha256",
+    "run_id",
+    "lifecycle_status",
+    "started_at",
+    "completed_at",
+    "case_ref",
+    "evidence_manifest_ref",
+    "harness_config_ref",
+    "runtime_config_ref",
+    "grader_set_ref",
+    "execution_fingerprint",
+    "environment_fingerprint",
+    "semantic_convention_version",
+    "redaction_policy_id",
+    "trace_ref",
+    "checkpoint_refs",
+    "diagnosis_ref",
+    "output_refs",
+    "grade_report_ref",
+    "failure_ref",
+    "parent_run_id",
+    "branch_id",
+    "checksums_ref"
+  ],
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "media_type",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schema_id": {
+          "type": "string",
+          "pattern": "^tracelane://schemas/[a-z0-9][a-z0-9-]*/v[0-9]+$"
+        }
+      }
+    },
+    "object_envelope_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        {
+          "required": [
+            "schema_id"
+          ],
+          "properties": {
+            "schema_id": {
+              "const": "tracelane://schemas/object-envelope/v2"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        }
+      ]
+    },
+    "case_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        {
+          "required": [
+            "schema_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "case"
+            },
+            "schema_id": {
+              "const": "tracelane://schemas/case/v2"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        }
+      ]
+    },
+    "evidence_manifest_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        {
+          "required": [
+            "schema_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "evidence_manifest"
+            },
+            "schema_id": {
+              "const": "tracelane://schemas/evidence-manifest/v2"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        }
+      ]
+    },
+    "harness_config_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object_envelope_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "harness_config"
+            }
+          }
+        }
+      ]
+    },
+    "runtime_config_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object_envelope_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "runtime_config"
+            }
+          }
+        }
+      ]
+    },
+    "grader_set_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object_envelope_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "grader_set"
+            }
+          }
+        }
+      ]
+    },
+    "trace_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        {
+          "required": [
+            "schema_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "trace"
+            },
+            "schema_id": {
+              "const": "tracelane://schemas/trace-event/v2"
+            },
+            "media_type": {
+              "const": "application/x-ndjson"
+            }
+          }
+        }
+      ]
+    },
+    "checkpoint_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object_envelope_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "checkpoint"
+            }
+          }
+        }
+      ]
+    },
+    "diagnosis_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object_envelope_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "diagnosis"
+            }
+          }
+        }
+      ]
+    },
+    "output_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object_envelope_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "output"
+            }
+          }
+        }
+      ]
+    },
+    "grade_report_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object_envelope_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "grade_report"
+            }
+          }
+        }
+      ]
+    },
+    "failure_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/object_envelope_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "failure_record"
+            }
+          }
+        }
+      ]
+    },
+    "checksums_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        {
+          "required": [
+            "schema_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "checksums"
+            },
+            "schema_id": {
+              "const": "tracelane://schemas/checksums/v2"
+            },
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema_id": {
+      "const": "tracelane://schemas/run-manifest/v2"
+    },
+    "schema_version": {
+      "const": "2.0.0"
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "lifecycle_status": {
+      "enum": [
+        "created",
+        "running",
+        "completed",
+        "failed"
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "case_ref": {
+      "$ref": "#/$defs/case_ref"
+    },
+    "evidence_manifest_ref": {
+      "$ref": "#/$defs/evidence_manifest_ref"
+    },
+    "harness_config_ref": {
+      "$ref": "#/$defs/harness_config_ref"
+    },
+    "runtime_config_ref": {
+      "$ref": "#/$defs/runtime_config_ref"
+    },
+    "grader_set_ref": {
+      "$ref": "#/$defs/grader_set_ref"
+    },
+    "execution_fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_sha256",
+        "evidence_manifest_sha256",
+        "harness_config_sha256",
+        "runtime_config_sha256",
+        "grader_set_sha256",
+        "repeat",
+        "code_revision"
+      ],
+      "properties": {
+        "case_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "evidence_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "harness_config_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "runtime_config_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "grader_set_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "repeat": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "code_revision": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "environment_fingerprint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "semantic_convention_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "redaction_policy_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trace_ref": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/trace_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "checkpoint_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/checkpoint_ref"
+      }
+    },
+    "diagnosis_ref": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/diagnosis_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "output_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/output_ref"
+      }
+    },
+    "grade_report_ref": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/grade_report_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "failure_ref": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/failure_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "parent_run_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "branch_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "checksums_ref": {
+      "$ref": "#/$defs/checksums_ref"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "lifecycle_status": {
+            "const": "completed"
+          }
+        },
+        "required": [
+          "lifecycle_status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "output_refs": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

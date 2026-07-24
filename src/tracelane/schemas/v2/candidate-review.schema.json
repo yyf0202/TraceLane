@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/candidate-review/v2",
+  "title": "TraceLane v2 Candidate Review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "content_sha256",
+    "candidate_id",
+    "candidate_record_sha256",
+    "candidate_content_sha256",
+    "source_locator_sha256",
+    "decision",
+    "reviewer",
+    "reviewed_at",
+    "document_date",
+    "date_precision",
+    "available_at",
+    "source_type",
+    "license",
+    "reason"
+  ],
+  "properties": {
+    "schema_id": {"const": "tracelane://schemas/candidate-review/v2"},
+    "schema_version": {"const": "2.0.0"},
+    "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_id": {"type": "string", "pattern": "^candidate_[0-9a-f]{24}$"},
+    "candidate_record_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "candidate_content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_locator_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "decision": {"enum": ["approved", "rejected"]},
+    "reviewer": {"type": "string", "minLength": 1},
+    "reviewed_at": {"type": "string", "format": "date-time"},
+    "document_date": {"type": "string", "pattern": "^[0-9]{4}(?:-[0-9]{2}(?:-[0-9]{2})?)?$"},
+    "date_precision": {"enum": ["day", "month", "year", "estimated"]},
+    "available_at": {"type": "string", "format": "date-time"},
+    "source_type": {"enum": ["primary", "secondary", "dataset"]},
+    "license": {"type": "string", "minLength": 1},
+    "reason": {"type": "string", "minLength": 1}
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/trace-event/v2",
+  "title": "TraceLane v2 Trace Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "event_id",
+    "previous_event_sha256",
+    "content_sha256",
+    "sequence",
+    "event_type",
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "correlation_id",
+    "causation_id",
+    "run_id",
+    "stage",
+    "recorded_at",
+    "attributes",
+    "payload",
+    "payload_classification",
+    "redaction_applied"
+  ],
+  "properties": {
+    "schema_id": {"const": "tracelane://schemas/trace-event/v2"},
+    "schema_version": {"const": "2.0.0"},
+    "event_id": {"type": "string", "pattern": "^evt_[0-9a-f]{64}$"},
+    "previous_event_sha256": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "event_type": {
+      "enum": [
+        "run.started",
+        "run.completed",
+        "evidence.collected",
+        "evidence.rejected",
+        "context.selected",
+        "plan.created",
+        "model.called",
+        "model.observed",
+        "tool.called",
+        "tool.observed",
+        "claim.created",
+        "assumption.created",
+        "scenario.branched",
+        "checkpoint.saved",
+        "constraint.checked",
+        "violation.detected",
+        "stage.started",
+        "stage.completed",
+        "stage.failed",
+        "answer.finalized",
+        "grade.completed",
+        "diagnosis.completed",
+        "repair.proposed",
+        "repair.approved",
+        "replay.started",
+        "replay.completed"
+      ]
+    },
+    "trace_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "span_id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+    "parent_span_id": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+        {"type": "null"}
+      ]
+    },
+    "correlation_id": {
+      "oneOf": [
+        {"type": "string", "minLength": 1, "maxLength": 128},
+        {"type": "null"}
+      ]
+    },
+    "causation_id": {
+      "oneOf": [
+        {"type": "string", "pattern": "^evt_[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "run_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stage": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[a-z][a-z0-9._-]{0,63}$"},
+        {"type": "null"}
+      ]
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{6})?Z$"
+    },
+    "attributes": {"type": "object"},
+    "payload": {"type": "object"},
+    "payload_classification": {"enum": ["internal", "restricted"]},
+    "redaction_applied": {"type": "boolean"}
+  },
+  "$defs": {
+    "nonEmptyString": {"type": "string", "minLength": 1},
+    "modelCalledPayload": {
+      "type": "object",
+      "required": ["turn", "runtime_id"],
+      "properties": {
+        "turn": {"type": "integer", "minimum": 0},
+        "runtime_id": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "modelObservedPayload": {
+      "type": "object",
+      "required": [
+        "turn",
+        "tool_call_count",
+        "has_output",
+        "input_tokens",
+        "output_tokens",
+        "cached_tokens",
+        "latency_ms"
+      ],
+      "properties": {
+        "turn": {"type": "integer", "minimum": 0},
+        "tool_call_count": {"type": "integer", "minimum": 0},
+        "has_output": {"type": "boolean"},
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "cached_tokens": {"type": "integer", "minimum": 0},
+        "latency_ms": {"type": "number", "minimum": 0}
+      }
+    },
+    "toolCalledPayload": {
+      "type": "object",
+      "required": ["call_id", "tool_name", "arguments"],
+      "properties": {
+        "call_id": {"$ref": "#/$defs/nonEmptyString"},
+        "tool_name": {"$ref": "#/$defs/nonEmptyString"},
+        "arguments": {"type": "object"}
+      }
+    },
+    "toolObservedPayload": {
+      "type": "object",
+      "required": ["call_id", "tool_name", "output", "is_error", "error_code"],
+      "properties": {
+        "call_id": {"$ref": "#/$defs/nonEmptyString"},
+        "tool_name": {"$ref": "#/$defs/nonEmptyString"},
+        "output": {},
+        "is_error": {"type": "boolean"},
+        "error_code": {
+          "oneOf": [
+            {"$ref": "#/$defs/nonEmptyString"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "runStartedPayload": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {"status": {"const": "running"}}
+    },
+    "runCompletedPayload": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {"status": {"const": "completed"}}
+    },
+    "stagePayload": {
+      "type": "object",
+      "required": ["stage_id"],
+      "properties": {
+        "stage_id": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "stageFailedPayload": {
+      "type": "object",
+      "required": ["stage_id", "error_code"],
+      "properties": {
+        "stage_id": {"$ref": "#/$defs/nonEmptyString"},
+        "error_code": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"event_type": {"const": "model.called"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/modelCalledPayload"}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "model.observed"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/modelObservedPayload"}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "tool.called"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/toolCalledPayload"}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "tool.observed"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/toolObservedPayload"}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "run.started"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/runStartedPayload"}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "run.completed"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/runCompletedPayload"}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "stage.started"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/stagePayload"}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "stage.completed"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/stagePayload"}}}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "stage.failed"}}},
+      "then": {"properties": {"payload": {"$ref": "#/$defs/stageFailedPayload"}}}
+    }
+  ]
+}

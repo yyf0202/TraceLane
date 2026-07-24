@@ -133,6 +133,33 @@ The run identity is derived from the task, frozen evidence bundle, harness
 configuration, model ID, and repeat number. Reopening the same run verifies the
 checkpoint chain before resuming.
 
+## Artifact integrity
+
+TraceLane verifies internal consistency: hashes, references, trace order,
+approval bindings, and complete run contents. It detects corruption and
+partial or stale substitutions. It does not claim authenticity against an
+attacker who can rewrite every artifact and Git history; a published Git
+commit or release digest is the external anchor.
+
+Manual acquisition uses a per-session lock and an authenticated operation
+journal for both ingest and promotion. Recovery validates the complete base
+inventory before materializing pending documents, validates the merged
+inventory, publishes the session manifest last, and removes the journal only
+after the published manifest is reread successfully.
+
+Promoted evidence can be archived into another artifact root without rewriting
+its references. The archive authenticates the evidence record, candidate,
+approval review, curated content, and ordered transformations before copying,
+then recreates each original `tracelane://artifacts/...` path with the same
+digest, size, and bytes. An identical archive is idempotent; conflicting target
+bytes are never overwritten. This archive protocol does not itself create or
+approve a public historical fixture.
+
+Trace payloads and free-text mapping keys retain redaction, while structural
+trace identities fail closed when their final serialized values collide with a
+configured secret. Identity fields are not redacted because changing them
+would invalidate the trace hash chain.
+
 ## Evaluation
 
 Run the complete synthetic suite:
@@ -172,6 +199,23 @@ Current graders cover:
 - Canonical serialization rejects non-finite numbers.
 - Fixed-clock golden tests lock normalized output.
 - Core artifacts are byte-stable across different output directories.
+
+### Migration trust boundary
+
+The v1-to-v2 importer is a local, operator-controlled migration boundary. It
+copies a selected v1 run without executing its contents or using the network,
+rejects linked trees and a target/import tree placed inside the selected
+source, and binds the source and copied payload to explicit file inventories
+and root digests. A target outside the source may contain the source; this is
+not rejected as an overlap. The importer also verifies that the source remains
+unchanged throughout the copy. Each migrated file is published atomically, and
+the migration is considered complete only after an authenticated completion
+marker covers the published inventory.
+
+Those hashes prove internal snapshot consistency; they do not establish who
+created the v1 source or whether its claims are true. Operators must select a
+trusted local source. For published experiments, the repository commit and
+release digest remain the external publication anchor.
 
 Run the local checks:
 

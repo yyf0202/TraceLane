@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/artifact-ref/v2",
+  "title": "TraceLane v2 Artifact Reference",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "uri",
+    "media_type",
+    "sha256",
+    "size_bytes"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "uri": {
+      "type": "string",
+      "pattern": "^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+    },
+    "media_type": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "size_bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "schema_id": {
+      "type": "string",
+      "pattern": "^tracelane://schemas/[a-z0-9][a-z0-9-]*/v[0-9]+$"
+    }
+  }
+}
