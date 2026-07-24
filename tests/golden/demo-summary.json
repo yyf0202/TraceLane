@@ -1,0 +1,79 @@
+{
+  "grades": {
+    "completion": {
+      "coverage": 1.0,
+      "covered_required_facts": 1,
+      "required_facts": 1
+    },
+    "grounding": {
+      "citation_precision": 1.0,
+      "citation_recall": 1.0,
+      "cited_claims": 1,
+      "supported_cited_claims": 1,
+      "unsupported_claims": 0
+    },
+    "passed": true,
+    "pit": {
+      "pit_safe": true,
+      "pit_violations": 0
+    },
+    "recovery": {
+      "recovery_applicable": false,
+      "recovery_success": null,
+      "repeated_completed_stages": [],
+      "resume_position": null
+    }
+  },
+  "identity": {
+    "bundle_sha256": "781ed90fa6c3cc6b738771dc9a21add1fa1d1713176f3dd4481fc60ed687eed0",
+    "config_sha256": "a752a68ff199c95821fa049700f8d2104cfd1fd6de0bb9403b5e40f269d97468",
+    "model_id": "deterministic-stub-v1",
+    "repeat": 1,
+    "task_sha256": "1a5c9dbe725024a3316ec59562d48b4ee9c32ca359aa9ad2cf282354aed878f8"
+  },
+  "operations": {
+    "cached_tokens": 0,
+    "input_tokens": 202,
+    "latency_ms": 2,
+    "model_calls": 2,
+    "output_tokens": 65,
+    "repeated_stages": [],
+    "resume_position": null,
+    "retries": 0,
+    "tool_calls": 1
+  },
+  "run_id": "07dfdd1e37068faacb15534c2f4bb15bac9ebc8c0f5c5df734fcde64b1aedb55",
+  "stages": [
+    {
+      "event": "stage.completed",
+      "stage": "gather"
+    },
+    {
+      "event": "stage.completed",
+      "stage": "analyze"
+    },
+    {
+      "event": "stage.skipped",
+      "stage": "debate"
+    },
+    {
+      "event": "stage.completed",
+      "stage": "finalize"
+    },
+    {
+      "event": "stage.completed",
+      "stage": "validate"
+    },
+    {
+      "event": "stage.completed",
+      "stage": "publish"
+    }
+  ],
+  "status": "passed",
+  "validation": {
+    "answer_sha256": "b8c83810f4f24e31a84750f07c0df22bbdf2c565a38f71adc2daa37c92d7ad53",
+    "errors": [],
+    "schema_valid": true,
+    "valid": true
+  }
+}

@@ -51,6 +51,12 @@ class TraceRecorder:
         self._store = store
         self._clock = clock or (lambda: datetime.now(UTC))
         self._next_sequence = self._read_next_sequence()
+        self._warnings: list[str] = []
+        self._write_disabled = False
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        return tuple(self._warnings)
 
     def _read_next_sequence(self) -> int:
         path = self._store.path_for("trace/events.jsonl")
@@ -91,6 +97,11 @@ class TraceRecorder:
             recorded_at=recorded_at.astimezone(UTC),
             payload=_freeze_mapping(payload),
         )
-        self._store.append_jsonl("trace/events.jsonl", event.to_dict())
+        if not self._write_disabled:
+            try:
+                self._store.append_jsonl("trace/events.jsonl", event.to_dict())
+            except OSError as exc:
+                self._warnings.append(f"trace write failed: {type(exc).__name__}")
+                self._write_disabled = True
         self._next_sequence += 1
         return event

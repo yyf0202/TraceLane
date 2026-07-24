@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from tracelane.adapters.fixtures import FixtureToolAdapter
@@ -58,6 +60,7 @@ def run_task(
     artifacts_root: str | Path,
     *,
     repeat: int = 1,
+    clock: Callable[[], datetime] | None = None,
 ) -> RunResult:
     records = FixtureToolAdapter().collect(task)
     bundle = freeze_evidence(task, records)
@@ -70,7 +73,7 @@ def run_task(
     )
     store = RunStore.create(artifacts_root, identity.run_id)
     trace_path = store.run_dir / "trace" / "events.jsonl"
-    orchestrator = Orchestrator(identity)
+    orchestrator = Orchestrator(identity, clock=clock)
 
     try:
         _write_inputs(store, task, bundle, config, identity)
@@ -82,7 +85,7 @@ def run_task(
                 "identity": identity.to_dict(),
             },
         )
-        TraceRecorder(store).emit(
+        TraceRecorder(store, clock=clock).emit(
             "tool.completed",
             {
                 "tool": "fixture-evidence",
@@ -107,7 +110,7 @@ def run_task(
         grades = grade_run(store)
         grades_value = grades.to_dict()
         store.write_json("output/grades.json", grades_value)
-        TraceRecorder(store).emit(
+        TraceRecorder(store, clock=clock).emit(
             "grader.completed",
             {
                 "passed": grades.passed,
