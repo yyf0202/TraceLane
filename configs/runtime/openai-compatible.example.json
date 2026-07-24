@@ -1,0 +1,18 @@
+{
+  "schema_id": "tracelane://local-config/openai-compatible/v1",
+  "schema_version": "1.0.0",
+  "runtime_id": "volcengine-ark-coding-plan",
+  "protocol": "openai-compatible",
+  "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+  "api_key": "replace-with-your-local-api-key",
+  "models": [
+    "deepseek-v4-pro",
+    "glm-5.2",
+    "deepseek-v4-flash",
+    "kimi-k2.7-code"
+  ],
+  "default_model": "deepseek-v4-pro",
+  "timeout_seconds": 60.0,
+  "max_retries": 2,
+  "supports_json_schema": true
+}

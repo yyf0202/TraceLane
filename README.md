@@ -53,6 +53,42 @@ tracelane inspect --run artifacts/demo/runs/<run-id>
 
 The default demo is fully offline and does not require an API key.
 
+## Local model configuration (v0.2)
+
+The v0.2 hosted runtime uses a private configuration that remains on the local
+machine. Copy the public template first:
+
+```powershell
+New-Item -ItemType Directory -Force .local | Out-Null
+Copy-Item configs/runtime/openai-compatible.example.json .local/runtime.json
+```
+
+Edit `.local/runtime.json` and set your own `api_key`, model list, and default
+model. `.local/` is ignored by Git; the committed example contains placeholders
+only.
+
+```json
+{
+  "protocol": "openai-compatible",
+  "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+  "api_key": "replace-with-your-local-api-key",
+  "models": ["deepseek-v4-pro", "glm-5.2"],
+  "default_model": "deepseek-v4-pro"
+}
+```
+
+For Ark Coding Plan, the OpenAI-compatible base URL uses `/api/coding/v3`;
+`/api/coding` without `/v3` is the Anthropic-compatible endpoint. Treat the
+provider's current documentation and console as authoritative.
+
+The private file supplies credentials only at process startup. Traces, run
+manifests, public runtime configs, and exports must never contain `api_key`.
+`.gitignore` is not a secret vault: rotate any key that has appeared in chat,
+logs, or Git history.
+
+The current v0.1 release does not read this file; it defines the configuration
+contract for the v0.2 hosted runtime.
+
 ## How it works
 
 ```mermaid

@@ -12,5 +12,7 @@ build/
 .env.*
 !.env.example
 artifacts/
+.local/
+.worktrees/
 .DS_Store
 Thumbs.db

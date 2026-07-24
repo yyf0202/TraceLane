@@ -755,6 +755,12 @@ Trace 保存可观察行为：模型输入、公开输出、工具调用、工�
 导出必须再次通过 Secret/PII Scanner。证据包只保存许可证允许再发布的原文；其余来源
 保存定位信息、必要短摘录、事实转述和 transformation lineage。
 
+Hosted Runtime 可以在进程启动时读取被 Git 忽略的 `.local/runtime.json`。该文件属于
+本机私有输入，不是 Run Artifact，也不参与可移植实验包。Loader 校验后立即把
+`api_key` 与非秘密配置拆开：Key 只进入内存中的 HTTP Authorization Header；
+`input/runtime-config.json` 只保存 Provider、Base URL、Model、协议能力和
+`credential_source=local_private_config`，不得保存 Key、Key 哈希或可逆提示。
+
 ### 14.5 Run 与 Experiment 布局
 
 ```text

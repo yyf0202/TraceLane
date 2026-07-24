@@ -51,6 +51,37 @@ tracelane inspect --run artifacts/demo/runs/<run-id>
 
 默认 Demo 完全离线，不需要 API Key。
 
+## 本地模型配置（v0.2）
+
+v0.2 的 Hosted Runtime 使用一个只保存在本机的私有配置。先复制公开模板：
+
+```powershell
+New-Item -ItemType Directory -Force .local | Out-Null
+Copy-Item configs/runtime/openai-compatible.example.json .local/runtime.json
+```
+
+然后编辑 `.local/runtime.json`，填写自己的 `api_key`、模型列表和默认模型。`.local/`
+已经加入 `.gitignore`，不会进入正常的 Git 提交；公开模板只包含占位值。
+
+```json
+{
+  "protocol": "openai-compatible",
+  "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+  "api_key": "replace-with-your-local-api-key",
+  "models": ["deepseek-v4-pro", "glm-5.2"],
+  "default_model": "deepseek-v4-pro"
+}
+```
+
+方舟 Coding Plan 的 OpenAI-compatible Base URL 需要 `/api/coding/v3`；不带 `/v3`
+的 `/api/coding` 是 Anthropic-compatible 入口。以服务商当前文档和控制台为准。
+
+私有配置只负责在进程启动时提供凭证。Trace、Run Manifest、Runtime Config 和导出文件
+只记录非秘密字段，不得保存 `api_key`。`.gitignore` 不是密钥保险箱：一旦 Key 曾经
+进入聊天、日志或 Git 历史，应立即在服务商控制台吊销并重新生成。
+
+当前 v0.1 尚不会读取该文件；它是 v0.2 Hosted Runtime 的配置约定。
+
 ## 工作流程
 
 ```mermaid

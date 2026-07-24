@@ -3037,6 +3037,7 @@ git commit -m "feat: export trace rewards and preferences"
 
 **Files:**
 - Create: `src/tracelane/runtime/openai_compatible.py`
+- Create: `src/tracelane/schemas/local/openai-compatible.schema.json`
 - Create: `src/tracelane/schemas/v2/runtime-config.schema.json`
 - Create: `tests/v2/test_openai_compatible_runtime.py`
 - Modify: `pyproject.toml`
@@ -3044,6 +3045,7 @@ git commit -m "feat: export trace rewards and preferences"
 **Interfaces:**
 - Produces: `ChatTransport.post_json(...) -> Mapping[str, object]`
 - Produces: `OpenAICompatibleRuntime.complete_turn(request: AgentTurnRequest) -> AgentTurnResponse`
+- Produces: `load_local_runtime_config(path: Path) -> tuple[HostedRuntimeConfig, str]`
 - Produces: `HostedRuntimeConfig.to_public_dict() -> dict[str, object]`
 
 - [ ] **Step 1: Write failing request, tool-call, output, and secret tests**
@@ -3071,10 +3073,11 @@ def test_runtime_parses_schema_constrained_final_output() -> None:
 
 
 def test_public_runtime_config_never_contains_api_key() -> None:
-    config = runtime_config()
+    config, api_key = load_local_runtime_config(private_runtime_file())
     public = config.to_public_dict()
+    assert api_key == "test-secret"
     assert "api_key" not in canonical_json(public)
-    assert public["api_key_env"] == "TRACELANE_API_KEY"
+    assert public["credential_source"] == "local_private_config"
 ```
 
 - [ ] **Step 2: Run and confirm missing hosted runtime**
@@ -3095,7 +3098,7 @@ class HostedRuntimeConfig:
     runtime_id: str
     base_url: str
     model: str
-    api_key_env: str
+    credential_source: Literal["local_private_config"]
     timeout_seconds: float = 60.0
     max_retries: int = 2
     supports_json_schema: bool = True
@@ -3106,9 +3109,32 @@ class HostedRuntimeConfig:
         return value
 ```
 
-Only `api_key_env` is persisted. The caller resolves the environment variable
-and passes the secret to the runtime constructor; it is never placed in a
-dataclass, exception string, trace, or artifact.
+Implement the private loader as a narrow boundary:
+
+```python
+def load_local_runtime_config(path: Path) -> tuple[HostedRuntimeConfig, str]:
+    value = read_json_object(path)
+    validate_local_config("openai-compatible", value)
+    api_key = str(value["api_key"])
+    selected_model = str(value["default_model"])
+    if selected_model not in value["models"]:
+        raise ValueError("default model must be present in models")
+    public = HostedRuntimeConfig(
+        runtime_id=str(value["runtime_id"]),
+        base_url=str(value["base_url"]),
+        model=selected_model,
+        credential_source="local_private_config",
+        timeout_seconds=float(value["timeout_seconds"]),
+        max_retries=int(value["max_retries"]),
+        supports_json_schema=bool(value["supports_json_schema"]),
+    )
+    return public, api_key
+```
+
+The private schema requires the key to be non-empty but never includes its value
+in validation errors. The caller immediately passes the returned secret to the
+runtime constructor. It is never placed in a dataclass, exception string,
+trace, manifest, hash, or artifact.
 
 - [ ] **Step 4: Implement Chat Completions serialization and parsing**
 
@@ -3293,7 +3319,8 @@ migrate v1-run --source --artifacts
 `acquire` requires `--live-network`, reads the API key name from configuration,
 and never accepts a key as a command-line argument.
 `history-run --runtime openai-compatible` requires `--runtime-config`, resolves
-only the config's `api_key_env`, and refuses to persist the resolved value.
+the private file's `api_key` only in memory, and persists only
+`HostedRuntimeConfig.to_public_dict()`.
 
 - [ ] **Step 4: Implement one deterministic offline demonstration path**
 
@@ -3349,12 +3376,14 @@ The example runtime config contains no secret:
 
 ```json
 {
-  "schema_id": "tracelane://schemas/runtime-config/v2",
-  "schema_version": "2.0.0",
-  "runtime_id": "replace-with-provider-and-model",
+  "schema_id": "tracelane://local-config/openai-compatible/v1",
+  "schema_version": "1.0.0",
+  "runtime_id": "volcengine-ark-coding-plan",
+  "protocol": "openai-compatible",
   "base_url": "https://api.example/v1",
-  "model": "replace-with-model-id",
-  "api_key_env": "TRACELANE_API_KEY",
+  "api_key": "replace-with-your-local-api-key",
+  "models": ["replace-with-model-id"],
+  "default_model": "replace-with-model-id",
   "timeout_seconds": 60.0,
   "max_retries": 2,
   "supports_json_schema": true
@@ -3403,9 +3432,9 @@ Expected:
 - the generated experiment contains two research-report formats, diagnosis,
   comparison, Harness report, trajectories, preferences, and reward events.
 
-After the deterministic gate, create a local runtime config with the actual
-provider URL and model ID, set the API key environment variable outside the
-repository, and run exactly one hosted smoke test:
+After the deterministic gate, copy the public template to
+`.local/runtime.json`, set the actual provider URL, model ID, and rotated API
+key in that ignored local file, and run exactly one hosted smoke test:
 
 ```powershell
 tracelane history-run --artifacts artifacts/hosted-smoke --runtime openai-compatible --runtime-config .local/runtime.json --workflow evidence-ledger-counterargument-scenarios
