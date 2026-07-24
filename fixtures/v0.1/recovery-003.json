@@ -1,0 +1,25 @@
+{
+  "completion_facts": [
+    "fact-relay"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T10:50:00Z",
+      "evidence_id": "recovery-003-ev-01",
+      "fact_ids": [
+        "fact-relay"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Relay amber passed the restart check."
+    }
+  ],
+  "expected_facts": {
+    "fact-relay": "Relay amber passed the restart check."
+  },
+  "fault_scenario": "fail-once-finalize",
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Which relay passed the restart check?",
+  "task_id": "recovery-003"
+}

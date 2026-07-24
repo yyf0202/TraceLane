@@ -1,0 +1,34 @@
+{
+  "completion_facts": [
+    "fact-trail"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T09:40:00Z",
+      "evidence_id": "conflict-002-ev-01",
+      "fact_ids": [
+        "fact-trail"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "The morning inspection marks the trail open."
+    },
+    {
+      "available_at": "2026-04-15T09:41:00Z",
+      "evidence_id": "conflict-002-ev-02",
+      "fact_ids": [
+        "fact-trail"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "The follow-up inspection marks the trail closed."
+    }
+  ],
+  "expected_facts": {
+    "fact-trail": "The trail inspections disagree."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "What do the two trail inspections report?",
+  "task_id": "conflict-002"
+}

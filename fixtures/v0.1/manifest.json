@@ -1,0 +1,80 @@
+{
+  "generator_sha256": "b66b9a05ef181b70336c3d1a83a6bdc97a8bcb29e581361c8eac2d1de2fa01f6",
+  "license": "CC0-1.0 synthetic",
+  "suite_id": "tracelane-v0.1",
+  "tasks": [
+    {
+      "category": "summary",
+      "path": "summary-001.json",
+      "sha256": "7bf9ba4ed70bd54b3a15bcb78359abc6cd07a7e862032e6f9436f442c6a96a6a",
+      "task_id": "summary-001"
+    },
+    {
+      "category": "summary",
+      "path": "summary-002.json",
+      "sha256": "dbec4876603479c8b186b517341238d203d82b0eb443d77a75b484fc5a5028ad",
+      "task_id": "summary-002"
+    },
+    {
+      "category": "summary",
+      "path": "summary-003.json",
+      "sha256": "c114978ff106121612348e6690fdd74f4a9d5677082ec61be661329f776b3a2f",
+      "task_id": "summary-003"
+    },
+    {
+      "category": "conflict",
+      "path": "conflict-001.json",
+      "sha256": "b28698d75558e2a845360b2986c64accc7e5a5a182eaaa906bd1beca82fb030e",
+      "task_id": "conflict-001"
+    },
+    {
+      "category": "conflict",
+      "path": "conflict-002.json",
+      "sha256": "63ade719985fd30df05c5971dfd41952b27e4cf44cd289e840049ecfe9156ad0",
+      "task_id": "conflict-002"
+    },
+    {
+      "category": "conflict",
+      "path": "conflict-003.json",
+      "sha256": "96a04ae39c500c7bd0c48e696f67c22f6e758fbb70b685cb6a7aead5be205acd",
+      "task_id": "conflict-003"
+    },
+    {
+      "category": "pit",
+      "path": "pit-001.json",
+      "sha256": "d52aff88e410c8b653098e10d3cbaface26314dcad12d061014c8e18958ddca3",
+      "task_id": "pit-001"
+    },
+    {
+      "category": "pit",
+      "path": "pit-002.json",
+      "sha256": "f87afcf488c436aab2791689c5c4576fde43a08b253178e83a4a2550d9a9c6a5",
+      "task_id": "pit-002"
+    },
+    {
+      "category": "pit",
+      "path": "pit-003.json",
+      "sha256": "4e9d3f8ffb71976f838dfe5c2bc4a2ce9cba2479cf388fb4ebe7ce1b8a6f657c",
+      "task_id": "pit-003"
+    },
+    {
+      "category": "recovery",
+      "path": "recovery-001.json",
+      "sha256": "66d3911957597bc6ddfd340849ce2f9609ae912d268d9e7c641eec506f76fef4",
+      "task_id": "recovery-001"
+    },
+    {
+      "category": "recovery",
+      "path": "recovery-002.json",
+      "sha256": "0e45cd15e4a13165a1dee7c81a0d085187b0839972c735530e22cedb4a9b7f40",
+      "task_id": "recovery-002"
+    },
+    {
+      "category": "recovery",
+      "path": "recovery-003.json",
+      "sha256": "5e2cb5ff8fa54730dd7c912c3e5646defb97b74bc7b3c77d8ef1cf85c54ef05f",
+      "task_id": "recovery-003"
+    }
+  ],
+  "version": "0.1.0"
+}

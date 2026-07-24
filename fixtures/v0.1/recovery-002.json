@@ -1,0 +1,25 @@
+{
+  "completion_facts": [
+    "fact-route"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T10:40:00Z",
+      "evidence_id": "recovery-002-ev-01",
+      "fact_ids": [
+        "fact-route"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Route delta passed the continuity check."
+    }
+  ],
+  "expected_facts": {
+    "fact-route": "Route delta passed the continuity check."
+  },
+  "fault_scenario": "fail-once-finalize",
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Which route passed the continuity check?",
+  "task_id": "recovery-002"
+}

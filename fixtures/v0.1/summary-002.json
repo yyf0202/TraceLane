@@ -1,0 +1,25 @@
+{
+  "completion_facts": [
+    "fact-window"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T09:10:00Z",
+      "evidence_id": "summary-002-ev-01",
+      "fact_ids": [
+        "fact-window"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Parcel bay C closes at 16:00 for inspection."
+    }
+  ],
+  "expected_facts": {
+    "fact-window": "Parcel bay C closes at 16:00 for inspection."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "When does parcel bay C close for inspection?",
+  "task_id": "summary-002"
+}

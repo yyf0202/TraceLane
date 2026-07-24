@@ -1,0 +1,25 @@
+{
+  "completion_facts": [
+    "fact-zone"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T09:00:00Z",
+      "evidence_id": "summary-001-ev-01",
+      "fact_ids": [
+        "fact-zone"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "The north marsh is the priority habitat zone."
+    }
+  ],
+  "expected_facts": {
+    "fact-zone": "The north marsh is the priority habitat zone."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Which habitat zone should the survey team prioritize?",
+  "task_id": "summary-001"
+}

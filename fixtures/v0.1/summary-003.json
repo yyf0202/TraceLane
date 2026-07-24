@@ -1,0 +1,25 @@
+{
+  "completion_facts": [
+    "fact-entrance"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T09:20:00Z",
+      "evidence_id": "summary-003-ev-01",
+      "fact_ids": [
+        "fact-entrance"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "The east entrance remains accessible."
+    }
+  ],
+  "expected_facts": {
+    "fact-entrance": "The east entrance remains accessible."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Which entrance remains accessible during the drill?",
+  "task_id": "summary-003"
+}

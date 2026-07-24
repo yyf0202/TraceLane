@@ -1,0 +1,25 @@
+{
+  "completion_facts": [
+    "fact-unit"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T10:30:00Z",
+      "evidence_id": "recovery-001-ev-01",
+      "fact_ids": [
+        "fact-unit"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Backup unit red passed the readiness check."
+    }
+  ],
+  "expected_facts": {
+    "fact-unit": "Backup unit red passed the readiness check."
+  },
+  "fault_scenario": "fail-once-finalize",
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Which backup unit passed the readiness check?",
+  "task_id": "recovery-001"
+}

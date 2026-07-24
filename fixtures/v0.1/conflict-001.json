@@ -1,0 +1,34 @@
+{
+  "completion_facts": [
+    "fact-pressure"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T09:30:00Z",
+      "evidence_id": "conflict-001-ev-01",
+      "fact_ids": [
+        "fact-pressure"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "The first gauge reports stable pressure."
+    },
+    {
+      "available_at": "2026-04-15T09:31:00Z",
+      "evidence_id": "conflict-001-ev-02",
+      "fact_ids": [
+        "fact-pressure"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "The second gauge reports unstable pressure."
+    }
+  ],
+  "expected_facts": {
+    "fact-pressure": "The pressure inspections disagree."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "What do the two pressure inspections report?",
+  "task_id": "conflict-001"
+}

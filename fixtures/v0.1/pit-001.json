@@ -1,0 +1,36 @@
+{
+  "completion_facts": [
+    "fact-gate"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T10:00:00Z",
+      "evidence_id": "pit-001-ev-01",
+      "fact_ids": [
+        "fact-gate"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Gate four was open at the cutoff."
+    },
+    {
+      "available_at": "2026-04-15T12:00:01Z",
+      "evidence_id": "pit-001-ev-02",
+      "fact_ids": [
+        "fact-gate"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Gate four closed after the cutoff."
+    }
+  ],
+  "expected_facts": {
+    "fact-gate": "Gate four was open at the cutoff."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [
+    "pit-001-ev-02"
+  ],
+  "license": "CC0-1.0 synthetic",
+  "question": "What was the status of gate four at the cutoff?",
+  "task_id": "pit-001"
+}

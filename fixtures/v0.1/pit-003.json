@@ -1,0 +1,36 @@
+{
+  "completion_facts": [
+    "fact-reading"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T10:20:00Z",
+      "evidence_id": "pit-003-ev-01",
+      "fact_ids": [
+        "fact-reading"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Reading seven was verified at the cutoff."
+    },
+    {
+      "available_at": "2026-04-15T12:00:01Z",
+      "evidence_id": "pit-003-ev-02",
+      "fact_ids": [
+        "fact-reading"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Reading eight was verified after the cutoff."
+    }
+  ],
+  "expected_facts": {
+    "fact-reading": "Reading seven was verified at the cutoff."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [
+    "pit-003-ev-02"
+  ],
+  "license": "CC0-1.0 synthetic",
+  "question": "Which reading was verified at the cutoff?",
+  "task_id": "pit-003"
+}

@@ -1,0 +1,36 @@
+{
+  "completion_facts": [
+    "fact-pump"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T10:10:00Z",
+      "evidence_id": "pit-002-ev-01",
+      "fact_ids": [
+        "fact-pump"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Pump blue was active at the cutoff."
+    },
+    {
+      "available_at": "2026-04-15T12:00:01Z",
+      "evidence_id": "pit-002-ev-02",
+      "fact_ids": [
+        "fact-pump"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "Pump green became active after the cutoff."
+    }
+  ],
+  "expected_facts": {
+    "fact-pump": "Pump blue was active at the cutoff."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [
+    "pit-002-ev-02"
+  ],
+  "license": "CC0-1.0 synthetic",
+  "question": "Which pump was active at the cutoff?",
+  "task_id": "pit-002"
+}

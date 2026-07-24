@@ -1,0 +1,34 @@
+{
+  "completion_facts": [
+    "fact-temperature"
+  ],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-15T09:50:00Z",
+      "evidence_id": "conflict-003-ev-01",
+      "fact_ids": [
+        "fact-temperature"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "The panel check reports a normal tank temperature."
+    },
+    {
+      "available_at": "2026-04-15T09:51:00Z",
+      "evidence_id": "conflict-003-ev-02",
+      "fact_ids": [
+        "fact-temperature"
+      ],
+      "source": "tracelane-synthetic-observation",
+      "text": "The handheld check reports an elevated tank temperature."
+    }
+  ],
+  "expected_facts": {
+    "fact-temperature": "The temperature checks disagree."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "What do the two tank temperature checks report?",
+  "task_id": "conflict-003"
+}

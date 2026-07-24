@@ -26,6 +26,9 @@ tracelane = "tracelane.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tracelane"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"fixtures/v0.1" = "tracelane/fixtures/v0.1"
+
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
