@@ -15,6 +15,7 @@ from tracelane.contracts import (
 )
 from tracelane.runtime.base import ModelRequest, ModelResponse, ModelRuntime
 from tracelane.tracing import TraceRecorder
+from tracelane.validation import validate_answer
 
 
 def _context_records(
@@ -175,7 +176,7 @@ class Orchestrator:
         answer = self._stage(
             trace,
             "validate",
-            lambda: self._validate_answer(finalized, context),
+            lambda: self._validate_answer(finalized, task, bundle),
             completion_payload=lambda _value: {"valid": True},
         )
         self._stage(
@@ -271,21 +272,11 @@ class Orchestrator:
     @staticmethod
     def _validate_answer(
         value: Mapping[str, object],
-        evidence: tuple[EvidenceRecord, ...],
+        task: TaskSpec,
+        bundle: FrozenBundle,
     ) -> AgentAnswer:
         answer = load_answer(value)
-        evidence_by_id = {record.evidence_id: record for record in evidence}
-        for claim in answer.claims:
-            unknown_evidence = set(claim.evidence_ids) - set(evidence_by_id)
-            if unknown_evidence:
-                identifiers = sorted(unknown_evidence)
-                raise ValueError(
-                    f"answer references evidence outside admitted context: {identifiers}"
-                )
-            for fact_id in claim.fact_ids:
-                if not any(
-                    fact_id in evidence_by_id[evidence_id].fact_ids
-                    for evidence_id in claim.evidence_ids
-                ):
-                    raise ValueError("answer claim is not supported by its cited evidence")
+        report = validate_answer(answer, task, bundle)
+        if not report.valid:
+            raise ValueError("answer validation failed")
         return answer

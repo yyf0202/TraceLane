@@ -13,8 +13,10 @@ from tracelane.contracts import (
     sha256_json,
 )
 from tracelane.evidence import freeze_evidence
+from tracelane.graders.metrics import grade_run
 from tracelane.orchestrator import Orchestrator
 from tracelane.runtime.base import ModelRuntime
+from tracelane.tracing import TraceRecorder
 
 
 @dataclass(frozen=True)
@@ -80,7 +82,41 @@ def run_task(
                 "identity": identity.to_dict(),
             },
         )
+        TraceRecorder(store).emit(
+            "tool.completed",
+            {
+                "tool": "fixture-evidence",
+                "record_count": len(records),
+                "bundle_sha256": bundle.bundle_sha256,
+            },
+            stage="gather",
+        )
         orchestrator.run(task, bundle, config, runtime, store)
+        answer_path = store.run_dir / "output" / "answer.json"
+        answer_sha256 = sha256_json(store.read_json("output/answer.json"))
+        store.write_json(
+            "run.json",
+            {
+                "run_id": identity.run_id,
+                "status": "published",
+                "identity": identity.to_dict(),
+                "answer_sha256": answer_sha256,
+                "answer_published": True,
+            },
+        )
+        grades = grade_run(store)
+        grades_value = grades.to_dict()
+        store.write_json("output/grades.json", grades_value)
+        TraceRecorder(store).emit(
+            "grader.completed",
+            {
+                "passed": grades.passed,
+                "completion_coverage": grades.completion.coverage,
+                "citation_precision": grades.grounding.citation_precision,
+                "citation_recall": grades.grounding.citation_recall,
+                "pit_violations": grades.pit.pit_violations,
+            },
+        )
     except Exception as exc:
         store.write_json(
             "run.json",
@@ -99,19 +135,21 @@ def run_task(
             resumed_from=orchestrator.resumed_from,
         )
 
-    answer_path = store.run_dir / "output" / "answer.json"
+    status = "passed" if grades.passed else "failed"
     store.write_json(
         "run.json",
         {
             "run_id": identity.run_id,
-            "status": "published",
+            "status": status,
             "identity": identity.to_dict(),
-            "answer_sha256": sha256_json(store.read_json("output/answer.json")),
+            "answer_sha256": answer_sha256,
+            "grades_sha256": sha256_json(grades_value),
+            "answer_published": True,
         },
     )
     return RunResult(
         run_id=identity.run_id,
-        status="published",
+        status=status,
         answer_path=answer_path,
         trace_path=trace_path,
         resumed_from=orchestrator.resumed_from,

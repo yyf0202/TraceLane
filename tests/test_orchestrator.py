@@ -33,7 +33,7 @@ def test_conditional_stage_machine_skips_unneeded_debate(tmp_path: Path) -> None
         runtime,
         tmp_path,
     )
-    assert result.status == "published"
+    assert result.status == "passed"
     assert stage_transitions(result) == [
         ("stage.started", "gather"),
         ("stage.completed", "gather"),
@@ -58,7 +58,7 @@ def test_always_debate_executes_exactly_once(tmp_path: Path) -> None:
         runtime,
         tmp_path,
     )
-    assert result.status == "published"
+    assert result.status == "passed"
     assert [request.stage for request in runtime.requests].count("debate") == 1
     assert ("stage.completed", "debate") in stage_transitions(result)
 
@@ -73,7 +73,7 @@ def test_budgeted_context_is_the_only_evidence_visible_to_runtime(tmp_path: Path
         runtime,
         tmp_path,
     )
-    assert result.status == "published"
+    assert result.status == "passed"
     assert runtime.requests
     assert {record.evidence_id for request in runtime.requests for record in request.evidence} == {
         first_record.evidence_id
@@ -95,7 +95,7 @@ def test_raw_context_exposes_future_control_arm_to_runtime(tmp_path: Path) -> No
         runtime,
         tmp_path,
     )
-    assert result.status == "published"
+    assert result.status == "failed"
     assert {record.evidence_id for record in runtime.requests[0].evidence} == {
         record.evidence_id for record in task.evidence
     }
@@ -119,7 +119,7 @@ def test_resume_from_analyze_does_not_repeat_completed_stages(tmp_path: Path) ->
     interrupted = run_task(task, HarnessConfig(), runtime, tmp_path)
     assert interrupted.status == "failed"
     resumed = run_task(task, HarnessConfig(), runtime, tmp_path)
-    assert resumed.status == "published"
+    assert resumed.status == "passed"
     assert resumed.resumed_from == "analyze"
     assert [request.stage for request in runtime.requests].count("analyze") == 1
     assert any(
