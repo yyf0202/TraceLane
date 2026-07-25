@@ -29,6 +29,7 @@ _SOURCE_CANDIDATE_URI = re.compile(
     r"^tracelane://artifacts/[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
 )
 _BLOB_URI = re.compile(r"^tracelane://evidence/blobs/sha256/[0-9a-f]{64}$")
+_LOCAL_STATE_COMPONENT = re.compile(r"(?:^|[\\/])\.local(?:$|[\\/])")
 _SOURCE_TYPES = frozenset({"primary", "secondary", "dataset"})
 _ROLES = frozenset({"evidence", "future-control"})
 _AUTHORS = frozenset({"repository_authored", "third_party"})
@@ -47,13 +48,33 @@ def candidate_record_digest(value: Mapping[str, object]) -> str:
     return sha256_json(payload)
 
 
+def _validate_persisted_text(value: str, label: str) -> str:
+    if classify_and_redact(value).redaction_applied or _LOCAL_STATE_COMPONENT.search(value):
+        raise ValueError(f"{label} contains sensitive text")
+    return value
+
+
+def _contains_local_state_reference(value: object) -> bool:
+    if isinstance(value, Mapping):
+        return any(
+            _contains_local_state_reference(str(key))
+            or _contains_local_state_reference(item)
+            for key, item in value.items()
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return any(_contains_local_state_reference(item) for item in value)
+    return isinstance(value, str) and _LOCAL_STATE_COMPONENT.search(value) is not None
+
+
+def _validate_persisted_json(value: object, label: str) -> None:
+    if classify_and_redact(value).redaction_applied or _contains_local_state_reference(value):
+        raise ValueError(f"{label} contains sensitive text")
+
+
 def _non_empty(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} must be a non-empty string")
-    normalized = value.strip()
-    if classify_and_redact(normalized).redaction_applied:
-        raise ValueError(f"{label} contains sensitive text")
-    return normalized
+    return _validate_persisted_text(value.strip(), label)
 
 
 def _digest(value: object, label: str) -> str:
@@ -72,10 +93,12 @@ def _sorted_unique_strings(value: object, label: str, *, required: bool = True) 
     if isinstance(value, str) or not isinstance(value, Sequence):
         raise ValueError(f"{label} must be a sequence")
     normalized = tuple(value)
-    if any(not isinstance(item, str) or not item.strip() for item in normalized):
-        raise ValueError(f"{label} must contain non-empty strings")
     if required and not normalized:
         raise ValueError(f"{label} must not be empty")
+    for item in normalized:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{label} must contain non-empty strings")
+        _validate_persisted_text(item, label)
     if tuple(sorted(normalized)) != normalized or len(set(normalized)) != len(normalized):
         raise ValueError(f"{label} must be sorted and unique")
     return normalized  # type: ignore[return-value]
@@ -516,6 +539,8 @@ class EvidenceTransformation:
             raise ValueError("transformation references must be objects")
         if not isinstance(parameters, Mapping):
             raise ValueError("parameters must be an object")
+        normalized_parameters = json.loads(canonical_json(parameters))
+        _validate_persisted_json(normalized_parameters, "parameters")
         transformation = cls(
             schema_id=str(value["schema_id"]),
             schema_version=str(value["schema_version"]),
@@ -528,7 +553,7 @@ class EvidenceTransformation:
             output_ref=ArtifactRef.from_dict(output_value),
             actor=str(value["actor"]),
             method=str(value["method"]),
-            parameters=json.loads(canonical_json(parameters)),
+            parameters=normalized_parameters,
             created_at=parse_utc(str(value["created_at"])),
             license_implications=str(value["license_implications"]),
         )

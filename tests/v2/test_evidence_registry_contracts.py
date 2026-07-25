@@ -287,6 +287,85 @@ def test_project_rejects_sensitive_persisted_text(
     assert_sensitive_text_is_rejected(lambda: EvidenceProject.create(**project_input), sensitive)
 
 
+def test_project_rejects_local_state_reference_without_echo(
+    project_input: dict[str, object],
+) -> None:
+    local_state_reference = ".local/runtime.json"
+    project_input["title"] = local_state_reference
+
+    assert_sensitive_text_is_rejected(
+        lambda: EvidenceProject.create(**project_input), local_state_reference
+    )
+
+
+def test_project_rejects_local_state_required_domain_without_echo(
+    project_input: dict[str, object],
+) -> None:
+    local_state_reference = r".local\runtime.json"
+    project_input["required_domains"] = (local_state_reference,)
+
+    assert_sensitive_text_is_rejected(
+        lambda: EvidenceProject.create(**project_input), local_state_reference
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "unsafe_tag"),
+    [
+        ("domains", r"C:\private\domain-tag.txt"),
+        ("fact_ids", ".local/runtime.json"),
+    ],
+)
+def test_candidate_rejects_unsafe_tags_without_echo(
+    candidate_input: dict[str, object],
+    field: str,
+    unsafe_tag: str,
+) -> None:
+    candidate_input[field] = (unsafe_tag,)
+
+    assert_sensitive_text_is_rejected(
+        lambda: ProjectEvidenceCandidate.create(**candidate_input), unsafe_tag
+    )
+
+
+def test_import_row_rejects_unsafe_tags_without_echo(candidate_input: dict[str, object]) -> None:
+    row = EvidenceImportRow.from_candidate(ProjectEvidenceCandidate.create(**candidate_input))
+    value = row.to_dict()
+    unsafe_tag = ".local/runtime.json"
+    value["domains"] = [unsafe_tag]
+
+    assert_sensitive_text_is_rejected(lambda: EvidenceImportRow.from_dict(value), unsafe_tag)
+
+
+@pytest.mark.parametrize(
+    ("parameters", "sensitive"),
+    [
+        ({"local_path": "safe"}, "local_path"),
+        ({"nested": [r"C:\private\parameters.json"]}, r"C:\private\parameters.json"),
+        ({"nested": [r".local\runtime.json"]}, r".local\runtime.json"),
+    ],
+)
+def test_transformation_rejects_unsafe_nested_parameters_without_echo(
+    parameters: dict[str, object],
+    sensitive: str,
+) -> None:
+    def create_transformation() -> EvidenceTransformation:
+        return EvidenceTransformation.create(
+            project_id="hist-001",
+            candidate_id="candidate_" + "a" * 24,
+            transformation_type="ocr",
+            input_ref=blob_ref(),
+            output_ref=blob_ref(digest="d" * 64),
+            actor="operator",
+            method="OCR",
+            parameters=parameters,
+            created_at=datetime(2026, 7, 24, tzinfo=UTC),
+            license_implications="None.",
+        )
+
+    assert_sensitive_text_is_rejected(create_transformation, sensitive)
+
+
 @pytest.mark.parametrize(
     ("field", "sensitive"),
     [
