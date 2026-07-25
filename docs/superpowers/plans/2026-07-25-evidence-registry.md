@@ -149,6 +149,113 @@ retention policy, sorted domains, sorted fact IDs, and role.
 `EvidenceImportMetadata` contains schema identity, session ID, acquisition
 manifest content digest, sorted rows, and its own content digest.
 
+The exact Task 1 wire fields are binding:
+
+```text
+EvidenceProject
+  schema_id = tracelane://schemas/evidence-project/v1
+  schema_version = 1.0.0
+  record_sha256: 64 lowercase hex
+  project_id: lowercase [a-z][a-z0-9-]{2,63}
+  title: non-empty string
+  research_question: non-empty string
+  historical_cutoff_at: canonical UTC datetime
+  intervention: non-empty string
+  required_domains: non-empty sorted unique tuple[str, ...]
+  future_control_policy = exclude_from_clean
+  admitted_source_types: non-empty sorted unique tuple of primary|secondary|dataset
+  status: active|paused|completed|archived
+
+ProjectEvidenceCandidate
+  schema_id = tracelane://schemas/project-evidence-candidate/v1
+  schema_version = 1.0.0
+  record_sha256: 64 lowercase hex
+  project_id: lowercase project ID
+  candidate_id: candidate_<24 lowercase hex>
+  source_spec_id: lowercase [a-z][a-z0-9_]{2,63}
+  query: non-empty string
+  title: non-empty string
+  source_url: canonical source URL
+  document_date: validated against date_precision
+  date_precision: day|month|year|estimated
+  retrieved_at: canonical UTC datetime
+  curator: non-empty string
+  source_type: primary|secondary|dataset
+  role: evidence|future-control
+  domains: non-empty sorted unique tuple[str, ...]
+  fact_ids: non-empty sorted unique tuple[str, ...]
+  content_ref: ArtifactRef(kind=evidence_blob, schema_id absent,
+               URI under tracelane://evidence/blobs/sha256/)
+  transformation_refs: sorted unique tuple of
+               ArtifactRef(kind=evidence_transformation, schema_id absent)
+  content_sha256: equal to content_ref.sha256
+  content_authorship: repository_authored|third_party
+  retention_policy:
+               paraphrase_only|public_domain_full_text|licensed_full_text
+  license_basis: non-empty string
+  acquisition_session_id: acquisition session ID
+  source_candidate_uri: original safe tracelane://artifacts/... candidate URI
+  source_candidate_id: equal to candidate_id
+  source_candidate_record_sha256: 64 lowercase hex
+  source_candidate_content_sha256: equal to content_sha256
+  trust_level = untrusted_external
+
+EvidenceTransformation
+  schema_id = tracelane://schemas/evidence-transformation/v1
+  schema_version = 1.0.0
+  record_sha256: 64 lowercase hex
+  transformation_id: transformation_<24 lowercase hex>
+  project_id: lowercase project ID
+  candidate_id: candidate_<24 lowercase hex>
+  transformation_type:
+               manual_excerpt|repository_paraphrase|translation|ocr|normalization
+  input_ref: ArtifactRef(kind=evidence_blob, schema_id absent)
+  output_ref: ArtifactRef(kind=evidence_blob, schema_id absent)
+  actor: non-empty string
+  method: non-empty string
+  parameters: canonical JSON object whose recursively nested values are
+              null, bool, int, finite float, str, list, or object
+  created_at: canonical UTC datetime
+  license_implications: non-empty string
+
+EvidenceImportRow
+  source_spec_id
+  candidate_id
+  candidate_record_sha256
+  candidate_content_sha256
+  source_type
+  license_basis
+  content_authorship
+  retention_policy
+  domains
+  fact_ids
+  role
+
+EvidenceImportMetadata
+  schema_id = tracelane://schemas/evidence-import-metadata/v1
+  schema_version = 1.0.0
+  content_sha256: digest of all other fields
+  project_id
+  session_id
+  manifest_sha256: acquisition manifest content_sha256
+  candidates: sorted unique tuple[EvidenceImportRow, ...] by candidate_id
+```
+
+Cross-field rules:
+
+- candidate ID is recomputed with the existing
+  `acquisition.compute_candidate_id` formula;
+- `repository_authored` pairs only with `paraphrase_only`;
+- `third_party` pairs only with `public_domain_full_text` or
+  `licensed_full_text`;
+- candidate source/content lineage IDs and digests must agree;
+- input and output transformation refs must be different content identities;
+- no Task 1 contract compares a candidate date with a project cutoff because
+  the project is not an argument to candidate parsing; Task 4 project
+  verification enforces that relationship;
+- all `to_dict()` methods revalidate stale dataclass instances; and
+- no current/effective status field is serialized on a candidate.
+
 - [ ] **Step 1: Write failing positive and negative contract tests**
 
 Create tests that exercise public constructors, round trips, stale
