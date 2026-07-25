@@ -17,6 +17,7 @@ from tracelane.v2.locking import exclusive_file_lock
 from tracelane.v2.storage import (
     ArtifactRoot,
     atomic_create_bytes,
+    atomic_create_bytes_with_identity,
     secure_read_bytes,
 )
 
@@ -669,6 +670,13 @@ class EvidenceRoot:
         self._validate_open_identity()
 
 
+@dataclass(frozen=True)
+class JsonPublicationReceipt:
+    reference: ArtifactRef
+    created_by_this_call: bool
+    filesystem_identity: tuple[int, int]
+
+
 class EvidenceBlobStore:
     def __init__(self, root: EvidenceRoot) -> None:
         if not isinstance(root, EvidenceRoot):
@@ -734,13 +742,62 @@ class EvidenceBlobStore:
         return target
 
 
-def write_json_create_or_match(
+def _read_json_publication_identity(
+    target: Path,
+    root: EvidenceRoot,
+) -> tuple[bytes, tuple[int, int]]:
+    try:
+        before = target.lstat()
+    except OSError as exc:
+        raise ValueError("evidence JSON is unavailable") from exc
+    if _is_link_or_reparse(before) or not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+        raise ValueError("evidence JSON is unavailable")
+    data = _secure_read(target, root, "evidence JSON")
+    try:
+        after = target.lstat()
+    except OSError as exc:
+        raise ValueError("evidence JSON changed during access") from exc
+    if (
+        _is_link_or_reparse(after)
+        or not stat.S_ISREG(after.st_mode)
+        or after.st_nlink != 1
+        or _identity(after) != _identity(before)
+    ):
+        raise ValueError("evidence JSON changed during access")
+    return data, _identity(after)
+
+
+def rollback_json_publication(
+    root: EvidenceRoot,
+    receipt: JsonPublicationReceipt,
+) -> None:
+    if not isinstance(root, EvidenceRoot) or not isinstance(receipt, JsonPublicationReceipt):
+        raise ValueError("evidence JSON publication receipt is invalid")
+    if not receipt.created_by_this_call:
+        return
+    target = root.resolve(receipt.reference.uri, must_exist=True)
+    data, identity = _read_json_publication_identity(target, root)
+    if (
+        identity != receipt.filesystem_identity
+        or len(data) != receipt.reference.size_bytes
+        or hashlib.sha256(data).hexdigest() != receipt.reference.sha256
+    ):
+        raise ValueError("evidence JSON rollback target changed")
+    try:
+        os.unlink(target)
+    except OSError as exc:
+        raise ValueError("evidence JSON rollback failed") from exc
+    if target.exists() or target.is_symlink():
+        raise ValueError("evidence JSON rollback failed")
+
+
+def write_json_create_or_match_receipt(
     root: EvidenceRoot,
     uri: str,
     kind: str,
     schema_id: str,
     value: Mapping[str, object],
-) -> ArtifactRef:
+) -> JsonPublicationReceipt:
     if not isinstance(root, EvidenceRoot):
         raise ValueError("evidence root is invalid")
     if not isinstance(value, Mapping):
@@ -766,22 +823,65 @@ def write_json_create_or_match(
     target = root.resolve(uri)
     root.ensure_parent(target)
     target = root.resolve(uri)
+    created_by_this_call = False
     try:
-        atomic_create_bytes(target, data, root=root.path, label="evidence JSON")
+        filesystem_identity = atomic_create_bytes_with_identity(
+            target,
+            data,
+            root=root.path,
+            label="evidence JSON",
+        )
+        created_by_this_call = True
     except ValueError as exc:
         try:
-            existing = _secure_read(target, root, "evidence JSON")
+            existing, filesystem_identity = _read_json_publication_identity(
+                target,
+                root,
+            )
         except ValueError:
             raise ValueError("evidence JSON publication failed") from exc
         if existing != data:
             raise ValueError("evidence JSON conflicts with existing content") from exc
-    read_json_object(
-        root,
-        reference,
-        expected_kind=kind,
-        expected_schema_id=schema_id,
+    receipt = JsonPublicationReceipt(
+        reference=reference,
+        created_by_this_call=created_by_this_call,
+        filesystem_identity=filesystem_identity,
     )
-    return reference
+    try:
+        read_json_object(
+            root,
+            reference,
+            expected_kind=kind,
+            expected_schema_id=schema_id,
+        )
+        confirmed_data, confirmed_identity = _read_json_publication_identity(
+            target,
+            root,
+        )
+        if confirmed_data != data or confirmed_identity != receipt.filesystem_identity:
+            raise ValueError("evidence JSON publication changed")
+    except (OSError, TypeError, ValueError) as exc:
+        if receipt.created_by_this_call:
+            with suppress(OSError, TypeError, ValueError):
+                rollback_json_publication(root, receipt)
+        raise ValueError("evidence JSON publication failed") from exc
+    return receipt
+
+
+def write_json_create_or_match(
+    root: EvidenceRoot,
+    uri: str,
+    kind: str,
+    schema_id: str,
+    value: Mapping[str, object],
+) -> ArtifactRef:
+    return write_json_create_or_match_receipt(
+        root,
+        uri,
+        kind,
+        schema_id,
+        value,
+    ).reference
 
 
 def read_json_object(

@@ -368,13 +368,13 @@ def atomic_write_bytes(
         temporary.unlink(missing_ok=True)
 
 
-def atomic_create_bytes(
+def atomic_create_bytes_with_identity(
     target: Path,
     data: bytes,
     *,
     root: str | Path | None = None,
     label: str = "file",
-) -> None:
+) -> tuple[int, int]:
     target = Path(target)
     if not isinstance(data, bytes):
         raise ValueError(f"{label} data must be bytes")
@@ -435,6 +435,7 @@ def atomic_create_bytes(
             raise ValueError(f"{label} published identity is invalid")
         if _identity(_validate_directory(parent, label)) != _identity(parent_before):
             raise ValueError(f"{label} parent changed while publishing")
+        return temporary_identity
     except BaseException:
         if linked and temporary_identity is not None:
             try:
@@ -446,6 +447,21 @@ def atomic_create_bytes(
         raise
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def atomic_create_bytes(
+    target: Path,
+    data: bytes,
+    *,
+    root: str | Path | None = None,
+    label: str = "file",
+) -> None:
+    atomic_create_bytes_with_identity(
+        target,
+        data,
+        root=root,
+        label=label,
+    )
 
 
 @dataclass(frozen=True)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -455,7 +456,7 @@ def test_evidence_rebuild_rolls_back_index_after_late_registry_failure(
     (target / "projects" / "hist-001" / "index.json").unlink()
     (target / "registry.json").unlink()
     before = _tree_state(target)
-    original_write = evidence_index.write_json_create_or_match
+    original_write = evidence_index.write_json_create_or_match_receipt
 
     def fail_registry(*args, **kwargs):
         if args[1] == "tracelane://evidence/registry.json":
@@ -464,7 +465,7 @@ def test_evidence_rebuild_rolls_back_index_after_late_registry_failure(
 
     monkeypatch.setattr(
         evidence_index,
-        "write_json_create_or_match",
+        "write_json_create_or_match_receipt",
         fail_registry,
     )
 
@@ -528,7 +529,7 @@ def test_evidence_rebuild_does_not_delete_replaced_file_during_rollback(
     index_path.unlink()
     registry_path.unlink()
     replacement = b"external replacement\n"
-    original_write = evidence_index.write_json_create_or_match
+    original_write = evidence_index.write_json_create_or_match_receipt
 
     def replace_before_failure(*args, **kwargs):
         if args[1] == "tracelane://evidence/registry.json":
@@ -538,7 +539,7 @@ def test_evidence_rebuild_does_not_delete_replaced_file_during_rollback(
 
     monkeypatch.setattr(
         evidence_index,
-        "write_json_create_or_match",
+        "write_json_create_or_match_receipt",
         replace_before_failure,
     )
 
@@ -557,6 +558,101 @@ def test_evidence_rebuild_does_not_delete_replaced_file_during_rollback(
     )
     assert capsys.readouterr().err == "tracelane: error: evidence rebuild-index failed\n"
     assert index_path.read_bytes() == replacement
+    assert not registry_path.exists()
+
+
+def test_evidence_rebuild_does_not_delete_identical_new_identity_during_rollback(
+    registry_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "rollback-identical-replacement"
+    shutil.copytree(registry_root, target)
+    index_path = target / "projects" / "hist-001" / "index.json"
+    registry_path = target / "registry.json"
+    index_path.unlink()
+    registry_path.unlink()
+    original_publish = evidence_index.write_json_create_or_match_receipt
+
+    def replace_before_failure(*args, **kwargs):
+        if args[1] == "tracelane://evidence/registry.json":
+            original_bytes = index_path.read_bytes()
+            replacement = index_path.with_suffix(".replacement")
+            replacement.write_bytes(original_bytes)
+            os.replace(replacement, index_path)
+            raise ValueError("injected registry publication failure")
+        return original_publish(*args, **kwargs)
+
+    monkeypatch.setattr(
+        evidence_index,
+        "write_json_create_or_match_receipt",
+        replace_before_failure,
+    )
+
+    assert (
+        main(
+            [
+                "evidence",
+                "rebuild-index",
+                "--root",
+                str(target),
+                "--project",
+                "hist-001",
+            ]
+        )
+        == 1
+    )
+    assert capsys.readouterr().err == "tracelane: error: evidence rebuild-index failed\n"
+    assert index_path.exists()
+    assert not registry_path.exists()
+
+
+def test_evidence_rebuild_does_not_rollback_identical_race_owned_by_other_writer(
+    registry_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "identical-publication-race"
+    shutil.copytree(registry_root, target)
+    index_path = target / "projects" / "hist-001" / "index.json"
+    registry_path = target / "registry.json"
+    index_path.unlink()
+    registry_path.unlink()
+    original_publish = evidence_index.write_json_create_or_match_receipt
+
+    def race_then_fail(*args, **kwargs):
+        root, uri, _kind, _schema_id, value = args
+        if uri.endswith("/index.json"):
+            root.ensure_parent(root.resolve(uri))
+            root.resolve(uri).write_bytes((canonical_json(value) + "\n").encode())
+            receipt = original_publish(*args, **kwargs)
+            assert receipt.created_by_this_call is False
+            return receipt
+        raise ValueError("injected registry publication failure")
+
+    monkeypatch.setattr(
+        evidence_index,
+        "write_json_create_or_match_receipt",
+        race_then_fail,
+    )
+
+    assert (
+        main(
+            [
+                "evidence",
+                "rebuild-index",
+                "--root",
+                str(target),
+                "--project",
+                "hist-001",
+            ]
+        )
+        == 1
+    )
+    assert capsys.readouterr().err == "tracelane: error: evidence rebuild-index failed\n"
+    assert index_path.exists()
     assert not registry_path.exists()
 
 
@@ -878,4 +974,27 @@ def test_import_script_has_no_post_commit_reverification_window(
     assert evidence_import.main(["--source", str(source), "--target", str(target)]) == 0
     assert verification_calls == 0
     assert "project=hist-001" in capsys.readouterr().out
+    assert verify_evidence_registry(target, "hist-001").candidate_count == 9
+
+
+def test_import_script_stdout_value_error_cannot_reverse_committed_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_import = importlib.import_module("scripts.import_hist001_evidence")
+    source = tmp_path / "source"
+    source.mkdir()
+    preparation.prepare(source)
+    target = tmp_path / "evidence"
+
+    class ClosedOutput:
+        def write(self, value: str) -> int:
+            raise ValueError("I/O operation on closed file")
+
+        def flush(self) -> None:
+            pass
+
+    monkeypatch.setattr(evidence_import.sys, "stdout", ClosedOutput())
+
+    assert evidence_import.main(["--source", str(source), "--target", str(target)]) == 0
     assert verify_evidence_registry(target, "hist-001").candidate_count == 9

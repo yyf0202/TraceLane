@@ -36,9 +36,12 @@ from tracelane.evidence_registry.reviews import (
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
     EvidenceRoot,
+    JsonPublicationReceipt,
     evidence_root_mutation_lock,
     read_json_object,
+    rollback_json_publication,
     write_json_create_or_match,
+    write_json_create_or_match_receipt,
 )
 
 __all__ = [
@@ -55,6 +58,7 @@ __all__ = [
     "EvidenceReview",
     "EvidenceRoot",
     "EvidenceTransformation",
+    "JsonPublicationReceipt",
     "ProjectEvidenceCandidate",
     "ReviewChain",
     "VerificationReport",
@@ -71,7 +75,9 @@ __all__ = [
     "rebuild_evidence_indexes",
     "rebuild_project_index",
     "rebuild_registry",
+    "rollback_json_publication",
     "validate_review_chain",
     "verify_evidence_registry",
     "write_json_create_or_match",
+    "write_json_create_or_match_receipt",
 ]

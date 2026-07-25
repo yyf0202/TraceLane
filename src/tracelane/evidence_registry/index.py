@@ -33,11 +33,14 @@ from tracelane.evidence_registry.reviews import (
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
     EvidenceRoot,
+    JsonPublicationReceipt,
     _is_link_or_reparse,
     _secure_read,
     evidence_root_mutation_lock,
     read_json_object,
+    rollback_json_publication,
     write_json_create_or_match,
+    write_json_create_or_match_receipt,
 )
 from tracelane.v2.contracts import ArtifactRef
 from tracelane.v2.schema import validate_document, validate_document_date
@@ -1130,22 +1133,6 @@ def rebuild_registry(root: EvidenceRoot | str | Path) -> ArtifactRef:
     return reference
 
 
-def _rollback_created_json(
-    root: EvidenceRoot,
-    reference: ArtifactRef,
-) -> None:
-    target = root.resolve(reference.uri, must_exist=True)
-    data = _secure_read(target, root, "evidence derived rollback target")
-    if len(data) != reference.size_bytes or hashlib.sha256(data).hexdigest() != reference.sha256:
-        raise ValueError("evidence derived rollback target changed")
-    try:
-        os.unlink(target)
-    except OSError as exc:
-        raise ValueError("evidence derived rollback failed") from exc
-    if target.exists() or target.is_symlink():
-        raise ValueError("evidence derived rollback failed")
-
-
 def rebuild_evidence_indexes(
     root: EvidenceRoot | str | Path,
     project_id: str,
@@ -1213,28 +1200,30 @@ def rebuild_evidence_indexes(
             overrides,
         )
 
-        created: list[ArtifactRef] = []
+        created: list[JsonPublicationReceipt] = []
         try:
-            published_index = write_json_create_or_match(
+            published_index = write_json_create_or_match_receipt(
                 authenticated_root,
                 index_uri,
                 "evidence_project_index",
                 _PROJECT_INDEX_SCHEMA,
                 final_project.expected_index.to_dict(),
             )
-            if published_index != index_ref:
+            if published_index.reference != index_ref:
                 raise ValueError("project index publication changed")
-            created.append(published_index)
-            published_registry = write_json_create_or_match(
+            if published_index.created_by_this_call:
+                created.append(published_index)
+            published_registry = write_json_create_or_match_receipt(
                 authenticated_root,
                 registry_uri,
                 "evidence_registry",
                 _REGISTRY_SCHEMA,
                 final_registry[0].to_dict(),
             )
-            if published_registry != registry_ref:
+            if published_registry.reference != registry_ref:
                 raise ValueError("evidence registry publication changed")
-            created.append(published_registry)
+            if published_registry.created_by_this_call:
+                created.append(published_registry)
             verified = verify_evidence_registry(
                 authenticated_root,
                 project_id,
@@ -1247,9 +1236,9 @@ def rebuild_evidence_indexes(
             return index_ref, registry_ref
         except (OSError, TypeError, ValueError):
             rollback_failed = False
-            for reference in reversed(created):
+            for receipt in reversed(created):
                 try:
-                    _rollback_created_json(authenticated_root, reference)
+                    rollback_json_publication(authenticated_root, receipt)
                 except (OSError, TypeError, ValueError):
                     rollback_failed = True
             if rollback_failed:

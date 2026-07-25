@@ -508,12 +508,71 @@ def test_json_write_is_canonical_utf8_and_create_or_match(
     assert evidence_root.resolve(uri).read_bytes() == expected
     assert not expected.startswith(b"\xef\xbb\xbf")
     assert expected.endswith(b"\n") and not expected.endswith(b"\n\n")
-    assert read_json_object(
+    assert (
+        read_json_object(
+            evidence_root,
+            first,
+            expected_kind="evidence_project",
+            expected_schema_id="tracelane://schemas/evidence-project/v1",
+        )
+        == value
+    )
+
+
+def test_json_publisher_self_cleans_after_post_create_validation_failure(
+    evidence_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uri = "tracelane://evidence/projects/hist-001/project.json"
+    target = evidence_root.resolve(uri)
+
+    def fail_validation(*args, **kwargs):
+        raise ValueError("injected post-create validation failure")
+
+    monkeypatch.setattr(evidence_storage, "read_json_object", fail_validation)
+
+    with pytest.raises(ValueError):
+        write_json_create_or_match(
+            evidence_root,
+            uri,
+            "evidence_project",
+            "tracelane://schemas/evidence-project/v1",
+            {"project_id": "hist-001"},
+        )
+
+    assert not target.exists()
+
+
+def test_json_publication_receipt_marks_identical_race_as_not_created(
+    evidence_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uri = "tracelane://evidence/projects/hist-001/project.json"
+    target = evidence_root.resolve(uri)
+
+    def publish_external_then_conflict(path: Path, data: bytes, **kwargs):
+        path.write_bytes(data)
+        raise ValueError("evidence JSON already exists")
+
+    monkeypatch.setattr(
+        evidence_storage,
+        "atomic_create_bytes_with_identity",
+        publish_external_then_conflict,
+        raising=False,
+    )
+
+    receipt = evidence_storage.write_json_create_or_match_receipt(
         evidence_root,
-        first,
-        expected_kind="evidence_project",
-        expected_schema_id="tracelane://schemas/evidence-project/v1",
-    ) == value
+        uri,
+        "evidence_project",
+        "tracelane://schemas/evidence-project/v1",
+        {"project_id": "hist-001"},
+    )
+
+    assert receipt.created_by_this_call is False
+    assert receipt.filesystem_identity == (target.lstat().st_dev, target.lstat().st_ino)
+    evidence_storage.rollback_json_publication(evidence_root, receipt)
+    assert target.exists()
 
 
 def test_project_index_json_round_trip(evidence_root: EvidenceRoot) -> None:
@@ -528,12 +587,15 @@ def test_project_index_json_round_trip(evidence_root: EvidenceRoot) -> None:
         value,
     )
 
-    assert read_json_object(
-        evidence_root,
-        reference,
-        expected_kind="evidence_project_index",
-        expected_schema_id="tracelane://schemas/evidence-project-index/v1",
-    ) == value
+    assert (
+        read_json_object(
+            evidence_root,
+            reference,
+            expected_kind="evidence_project_index",
+            expected_schema_id="tracelane://schemas/evidence-project-index/v1",
+        )
+        == value
+    )
 
 
 def test_json_write_rejects_conflicting_existing_bytes_without_overwrite(

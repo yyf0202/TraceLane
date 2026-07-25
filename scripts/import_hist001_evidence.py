@@ -227,22 +227,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             hist001_project(),
             metadata,
         )
-        with suppress(OSError):
-            print(
-                f"project={report.project_id} "
-                f"candidates={report.candidate_count} "
-                f"pending={report.pending_count} "
-                f"source_manifest_sha256={report.source_manifest_sha256} "
-                f"project_index_sha256={report.project_index_sha256} "
-                f"registry_sha256={report.registry_sha256}"
-            )
-        return 0
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
         print(
             "tracelane: error: HIST-001 evidence import failed",
             file=sys.stderr,
         )
         return 1
+    with suppress(OSError, ValueError):
+        print(
+            f"project={report.project_id} "
+            f"candidates={report.candidate_count} "
+            f"pending={report.pending_count} "
+            f"source_manifest_sha256={report.source_manifest_sha256} "
+            f"project_index_sha256={report.project_index_sha256} "
+            f"registry_sha256={report.registry_sha256}"
+        )
+    return 0
 
 
 if __name__ == "__main__":
