@@ -33,7 +33,7 @@ from tracelane.evidence_registry.storage import (
     EvidenceRoot,
     write_json_create_or_match,
 )
-from tracelane.v2.contracts import ArtifactRef
+from tracelane.v2.contracts import ArtifactRef, make_object_id
 from tracelane.v2.schema import validate_document
 
 
@@ -108,10 +108,7 @@ def _candidate(
     )
     write_json_create_or_match(
         root,
-        (
-            "tracelane://evidence/projects/hist-001/candidates/"
-            f"{candidate.candidate_id}.json"
-        ),
+        (f"tracelane://evidence/projects/hist-001/candidates/{candidate.candidate_id}.json"),
         "evidence_candidate",
         "tracelane://schemas/project-evidence-candidate/v1",
         candidate.to_dict(),
@@ -144,18 +141,10 @@ def _review(
 def registry_root(tmp_path: Path) -> EvidenceRoot:
     root = EvidenceRoot.create(tmp_path / "evidence")
     _write_project(root)
-    pending = _candidate(
-        root, ordinal=1, document_date="1811", date_precision="year"
-    )
-    approved = _candidate(
-        root, ordinal=2, document_date="1812-05", date_precision="month"
-    )
-    rejected = _candidate(
-        root, ordinal=3, document_date="1812-06-01", date_precision="day"
-    )
-    superseded = _candidate(
-        root, ordinal=4, document_date="1811-12", date_precision="estimated"
-    )
+    pending = _candidate(root, ordinal=1, document_date="1811", date_precision="year")
+    approved = _candidate(root, ordinal=2, document_date="1812-05", date_precision="month")
+    rejected = _candidate(root, ordinal=3, document_date="1812-06-01", date_precision="day")
+    superseded = _candidate(root, ordinal=4, document_date="1811-12", date_precision="estimated")
     _candidate(
         root,
         ordinal=5,
@@ -192,19 +181,14 @@ def test_project_index_is_canonical_sorted_and_source_derived(
     approved = next(entry for entry in index.entries if entry.effective_status == "approved")
     assert approved.current_review_ref is not None
     assert approved.current_review_ref.kind == "evidence_review"
-    assert (
-        approved.current_review_ref.schema_id
-        == "tracelane://schemas/evidence-review/v1"
-    )
+    assert approved.current_review_ref.schema_id == "tracelane://schemas/evidence-review/v1"
 
 
 def test_deleted_indexes_rebuild_byte_identically(registry_root: EvidenceRoot) -> None:
     project_path = registry_root.resolve(
         "tracelane://evidence/projects/hist-001/index.json", must_exist=True
     )
-    registry_path = registry_root.resolve(
-        "tracelane://evidence/registry.json", must_exist=True
-    )
+    registry_path = registry_root.resolve("tracelane://evidence/registry.json", must_exist=True)
     project_bytes = project_path.read_bytes()
     registry_bytes = registry_path.read_bytes()
 
@@ -240,6 +224,7 @@ def test_clean_query_excludes_future_control(registry_root: EvidenceRoot) -> Non
         registry_root,
         EvidenceQuery(project_id="hist-001", clean_only=True),
     )
+    assert len(values) == 4
     assert all(item.role != "future-control" for item in values)
 
 
@@ -267,9 +252,7 @@ def test_hand_edited_index_is_rejected(registry_root: EvidenceRoot) -> None:
     counts = value["status_counts"]
     assert isinstance(entries, list)
     assert isinstance(counts, dict)
-    approved = next(
-        item for item in entries if item["effective_status"] == "approved"
-    )
+    approved = next(item for item in entries if item["effective_status"] == "approved")
     approved["effective_status"] = "rejected"
     counts["approved"] -= 1
     counts["rejected"] += 1
@@ -310,10 +293,301 @@ def _rewrite_json(path: Path, value: dict[str, object]) -> None:
 
 
 def _index_value(root: EvidenceRoot) -> tuple[Path, dict[str, object]]:
-    path = root.resolve(
-        "tracelane://evidence/projects/hist-001/index.json", must_exist=True
-    )
+    path = root.resolve("tracelane://evidence/projects/hist-001/index.json", must_exist=True)
     return path, json.loads(path.read_text(encoding="utf-8"))
+
+
+def _tree_snapshot(root: EvidenceRoot) -> dict[str, bytes]:
+    return {
+        path.relative_to(root.path).as_posix(): path.read_bytes()
+        for path in sorted(root.path.rglob("*"))
+        if path.is_file()
+    }
+
+
+def _redigest_candidate(path: Path, changes: dict[str, object]) -> None:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value.update(changes)
+    value["record_sha256"] = candidate_record_digest(value)
+    _rewrite_json(path, value)
+
+
+def _corrupt_registry_record_digest(root: EvidenceRoot) -> None:
+    path = root.resolve("tracelane://evidence/registry.json", must_exist=True)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["record_sha256"] = "0" * 64
+    _rewrite_json(path, value)
+
+
+def _corrupt_project_record_digest(root: EvidenceRoot) -> None:
+    path = root.resolve(
+        "tracelane://evidence/projects/hist-001/project.json",
+        must_exist=True,
+    )
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["record_sha256"] = "0" * 64
+    _rewrite_json(path, value)
+
+
+def _corrupt_index_record_digest(root: EvidenceRoot) -> None:
+    path, value = _index_value(root)
+    value["record_sha256"] = "0" * 64
+    _rewrite_json(path, value)
+
+
+def _corrupt_candidate_source(root: EvidenceRoot) -> None:
+    _redigest_candidate(
+        _candidate_path_for_fact(root, "fact.1"),
+        {"source_url": "https://history.example/substituted-source"},
+    )
+
+
+def _corrupt_candidate_date(root: EvidenceRoot) -> None:
+    _redigest_candidate(
+        _candidate_path_for_fact(root, "fact.1"),
+        {"document_date": "1810"},
+    )
+
+
+def _corrupt_candidate_role(root: EvidenceRoot) -> None:
+    path = next(
+        path
+        for path in (root.path / "projects" / "hist-001" / "candidates").glob("*.json")
+        if json.loads(path.read_text(encoding="utf-8"))["role"] == "future-control"
+    )
+    _redigest_candidate(path, {"role": "evidence"})
+
+
+def _corrupt_candidate_facts(root: EvidenceRoot) -> None:
+    _redigest_candidate(
+        _candidate_path_for_fact(root, "fact.1"),
+        {"fact_ids": ["fact.changed"]},
+    )
+
+
+def _corrupt_candidate_domains(root: EvidenceRoot) -> None:
+    _redigest_candidate(
+        _candidate_path_for_fact(root, "fact.1"),
+        {"domains": ["military"]},
+    )
+
+
+def _corrupt_candidate_retention(root: EvidenceRoot) -> None:
+    _redigest_candidate(
+        _candidate_path_for_fact(root, "fact.1"),
+        {"content_authorship": "third_party"},
+    )
+
+
+def _corrupt_candidate_lineage(root: EvidenceRoot) -> None:
+    _redigest_candidate(
+        _candidate_path_for_fact(root, "fact.1"),
+        {"source_candidate_content_sha256": "0" * 64},
+    )
+
+
+def _corrupt_candidate_record_digest(root: EvidenceRoot) -> None:
+    path = _candidate_path_for_fact(root, "fact.1")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["record_sha256"] = "0" * 64
+    _rewrite_json(path, value)
+
+
+def _corrupt_candidate_blob_bytes(root: EvidenceRoot) -> None:
+    path = _candidate_path_for_fact(root, "fact.1")
+    candidate = ProjectEvidenceCandidate.from_dict(json.loads(path.read_text(encoding="utf-8")))
+    root.resolve(candidate.content_ref.uri, must_exist=True).write_bytes(b"corrupt blob bytes")
+
+
+def _corrupt_candidate_blob_size(root: EvidenceRoot) -> None:
+    path = _candidate_path_for_fact(root, "fact.1")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    content_ref = dict(value["content_ref"])
+    content_ref["size_bytes"] += 1
+    value["content_ref"] = content_ref
+    value["record_sha256"] = candidate_record_digest(value)
+    _rewrite_json(path, value)
+
+
+def _corrupt_candidate_blob_path(root: EvidenceRoot) -> None:
+    path = _candidate_path_for_fact(root, "fact.1")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    content_ref = dict(value["content_ref"])
+    content_ref["uri"] = "tracelane://evidence/blobs/sha256/" + "0" * 64
+    value["content_ref"] = content_ref
+    value["record_sha256"] = candidate_record_digest(value)
+    _rewrite_json(path, value)
+
+
+def _corrupt_candidate_inventory(root: EvidenceRoot) -> None:
+    source = _candidate_path_for_fact(root, "fact.1")
+    target = source.with_name("candidate_" + "0" * 24 + ".json")
+    target.write_bytes(source.read_bytes())
+
+
+def _corrupt_review_inventory(root: EvidenceRoot) -> None:
+    source = next((root.path / "projects" / "hist-001" / "reviews").glob("*.json"))
+    target = source.with_name("review_" + "0" * 24 + ".json")
+    target.write_bytes(source.read_bytes())
+
+
+def _approved_review_path(root: EvidenceRoot) -> Path:
+    return next(
+        path
+        for path in (root.path / "projects" / "hist-001" / "reviews").glob("*.json")
+        if json.loads(path.read_text(encoding="utf-8"))["decision"] == "approved"
+    )
+
+
+def _review_with_wire_identity(
+    value: dict[str, object],
+) -> dict[str, object]:
+    identity = {
+        key: item
+        for key, item in value.items()
+        if key
+        not in {
+            "schema_id",
+            "schema_version",
+            "review_id",
+            "record_sha256",
+        }
+    }
+    value["review_id"] = make_object_id("review", identity)
+    value["record_sha256"] = candidate_record_digest(value)
+    return value
+
+
+def _replace_approved_review(
+    root: EvidenceRoot,
+    changes: dict[str, object],
+) -> None:
+    source = _approved_review_path(root)
+    value = json.loads(source.read_text(encoding="utf-8"))
+    value.update(changes)
+    _review_with_wire_identity(value)
+    target = source.with_name(f"{value['review_id']}.json")
+    _rewrite_json(target, value)
+    if target != source:
+        source.unlink()
+
+
+def _corrupt_review_record_digest(root: EvidenceRoot) -> None:
+    path = _approved_review_path(root)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["record_sha256"] = "0" * 64
+    _rewrite_json(path, value)
+
+
+def _corrupt_review_candidate_digest(root: EvidenceRoot) -> None:
+    _replace_approved_review(
+        root,
+        {"candidate_record_sha256": "0" * 64},
+    )
+
+
+def _corrupt_review_chain_head(root: EvidenceRoot) -> None:
+    source = _approved_review_path(root)
+    value = json.loads(source.read_text(encoding="utf-8"))
+    value["reviewer"] = "second root reviewer"
+    _review_with_wire_identity(value)
+    _rewrite_json(source.with_name(f"{value['review_id']}.json"), value)
+
+
+def _corrupt_review_predecessor(root: EvidenceRoot) -> None:
+    _replace_approved_review(
+        root,
+        {"supersedes_review_id": "review_" + "f" * 24},
+    )
+
+
+def _corrupt_review_scope(root: EvidenceRoot) -> None:
+    _replace_approved_review(
+        root,
+        {
+            "approved_fact_ids": ["fact.outside-candidate"],
+            "approved_domains": ["diplomacy"],
+        },
+    )
+
+
+def _corrupt_review_decision(root: EvidenceRoot) -> None:
+    _replace_approved_review(
+        root,
+        {
+            "decision": "rejected",
+            "approved_fact_ids": [],
+            "approved_domains": [],
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("corrupt", "category"),
+    [
+        (_corrupt_registry_record_digest, "^evidence registry is invalid$"),
+        (_corrupt_project_record_digest, "^evidence project record is invalid$"),
+        (_corrupt_index_record_digest, "^project index is invalid$"),
+        (_corrupt_candidate_source, "^evidence candidate record is invalid$"),
+        (_corrupt_candidate_date, "^evidence candidate record is invalid$"),
+        (_corrupt_candidate_role, "^candidate date exceeds the project cutoff$"),
+        (_corrupt_candidate_facts, "^project index does not match source records$"),
+        (_corrupt_candidate_domains, "^project index does not match source records$"),
+        (_corrupt_candidate_retention, "^evidence candidate record is invalid$"),
+        (_corrupt_candidate_lineage, "^evidence candidate record is invalid$"),
+        (_corrupt_candidate_record_digest, "^evidence candidate record is invalid$"),
+        (_corrupt_candidate_blob_bytes, "^evidence blob hash mismatch$"),
+        (_corrupt_candidate_blob_size, "^evidence blob size mismatch$"),
+        (_corrupt_candidate_blob_path, "^evidence candidate record is invalid$"),
+        (_corrupt_review_record_digest, "^evidence review record is invalid$"),
+        (
+            _corrupt_review_candidate_digest,
+            "^project index does not match source records$",
+        ),
+        (_corrupt_review_chain_head, "^evidence review chain is invalid$"),
+        (_corrupt_review_predecessor, "^evidence review chain is invalid$"),
+        (_corrupt_review_scope, "^evidence review chain is invalid$"),
+        (_corrupt_review_decision, "^project index does not match source records$"),
+        (_corrupt_candidate_inventory, "^candidate inventory identity is invalid$"),
+        (_corrupt_review_inventory, "^review inventory identity is invalid$"),
+    ],
+    ids=[
+        "registry-digest",
+        "project-digest",
+        "index-digest",
+        "candidate-source",
+        "candidate-date",
+        "candidate-role-cutoff",
+        "candidate-facts",
+        "candidate-domains",
+        "candidate-retention",
+        "candidate-lineage",
+        "candidate-digest",
+        "blob-bytes",
+        "blob-size",
+        "blob-path",
+        "review-digest",
+        "review-candidate-digest",
+        "review-chain-head",
+        "review-predecessor",
+        "review-scope",
+        "review-decision",
+        "candidate-inventory",
+        "review-inventory",
+    ],
+)
+def test_registry_corruption_matrix_rejects_without_further_mutation(
+    registry_root: EvidenceRoot,
+    corrupt,
+    category: str,
+) -> None:
+    corrupt(registry_root)
+    corrupt_state = _tree_snapshot(registry_root)
+
+    with pytest.raises(ValueError, match=category):
+        verify_evidence_registry(registry_root, "hist-001")
+
+    assert _tree_snapshot(registry_root) == corrupt_state
 
 
 def test_new_source_candidate_cannot_remain_unindexed(
@@ -325,9 +599,15 @@ def test_new_source_candidate_cannot_remain_unindexed(
         document_date="1812-04-01",
         date_precision="day",
     )
+    changed_source_state = _tree_snapshot(registry_root)
 
-    with pytest.raises(ValueError, match="project index"):
+    with pytest.raises(
+        ValueError,
+        match="^project index does not match source records$",
+    ):
         verify_evidence_registry(registry_root)
+
+    assert _tree_snapshot(registry_root) == changed_source_state
 
 
 def test_validly_redigested_ghost_index_entry_is_rejected(
@@ -340,10 +620,7 @@ def test_validly_redigested_ghost_index_entry_is_rejected(
     ghost_id = "candidate_" + "f" * 24
     ghost["candidate_id"] = ghost_id
     candidate_ref = dict(ghost["candidate_ref"])
-    candidate_ref["uri"] = (
-        "tracelane://evidence/projects/hist-001/candidates/"
-        f"{ghost_id}.json"
-    )
+    candidate_ref["uri"] = f"tracelane://evidence/projects/hist-001/candidates/{ghost_id}.json"
     ghost["candidate_ref"] = candidate_ref
     ghost["effective_status"] = "pending"
     ghost.pop("current_review_ref", None)
@@ -371,9 +648,15 @@ def test_validly_redigested_stale_current_review_ref_is_rejected(
     reviewed["current_review_ref"] = review_ref
     value["record_sha256"] = candidate_record_digest(value)
     _rewrite_json(path, value)
+    corrupt_state = _tree_snapshot(registry_root)
 
-    with pytest.raises(ValueError, match="project index"):
+    with pytest.raises(
+        ValueError,
+        match="^project index does not match source records$",
+    ):
         verify_evidence_registry(registry_root)
+
+    assert _tree_snapshot(registry_root) == corrupt_state
 
 
 def test_duplicate_candidate_record_is_rejected_before_index_comparison(
@@ -397,10 +680,7 @@ def test_orphan_review_is_rejected(registry_root: EvidenceRoot) -> None:
     )
     _review(registry_root, orphan, "rejected")
     registry_root.resolve(
-        (
-            "tracelane://evidence/projects/hist-001/candidates/"
-            f"{orphan.candidate_id}.json"
-        ),
+        (f"tracelane://evidence/projects/hist-001/candidates/{orphan.candidate_id}.json"),
         must_exist=True,
     ).unlink()
 
@@ -411,16 +691,12 @@ def test_orphan_review_is_rejected(registry_root: EvidenceRoot) -> None:
 def _add_transformation_to_pending_candidate(
     root: EvidenceRoot,
 ) -> tuple[EvidenceTransformation, Path]:
-    candidate_paths = sorted(
-        (root.path / "projects" / "hist-001" / "candidates").glob("*.json")
-    )
+    candidate_paths = sorted((root.path / "projects" / "hist-001" / "candidates").glob("*.json"))
     candidate_path = next(
         path
         for path in candidate_paths
         if "fact.1"
-        in ProjectEvidenceCandidate.from_dict(
-            json.loads(path.read_text(encoding="utf-8"))
-        ).fact_ids
+        in ProjectEvidenceCandidate.from_dict(json.loads(path.read_text(encoding="utf-8"))).fact_ids
     )
     candidate = ProjectEvidenceCandidate.from_dict(
         json.loads(candidate_path.read_text(encoding="utf-8"))
@@ -453,9 +729,7 @@ def _add_transformation_to_pending_candidate(
     ref_value = transformation_ref.to_dict()
     ref_value.pop("schema_id")
     candidate_value = candidate.to_dict()
-    candidate_value["transformation_refs"] = [
-        ArtifactRef.from_dict(ref_value).to_dict()
-    ]
+    candidate_value["transformation_refs"] = [ArtifactRef.from_dict(ref_value).to_dict()]
     candidate_value["record_sha256"] = candidate_record_digest(candidate_value)
     _rewrite_json(candidate_path, candidate_value)
     return transformation, root.resolve(input_ref.uri, must_exist=True)
@@ -464,9 +738,7 @@ def _add_transformation_to_pending_candidate(
 def test_transformation_reference_and_blobs_are_authenticated(
     registry_root: EvidenceRoot,
 ) -> None:
-    transformation, input_path = _add_transformation_to_pending_candidate(
-        registry_root
-    )
+    transformation, input_path = _add_transformation_to_pending_candidate(registry_root)
     rebuilt = build_project_index(registry_root, "hist-001")
     transformed = next(
         item
@@ -502,10 +774,7 @@ def test_orphan_transformation_is_rejected(registry_root: EvidenceRoot) -> None:
     )
     write_json_create_or_match(
         registry_root,
-        (
-            "tracelane://evidence/projects/hist-001/transformations/"
-            f"{orphan.transformation_id}.json"
-        ),
+        (f"tracelane://evidence/projects/hist-001/transformations/{orphan.transformation_id}.json"),
         "evidence_transformation",
         "tracelane://schemas/evidence-transformation/v1",
         orphan.to_dict(),
@@ -518,9 +787,9 @@ def test_orphan_transformation_is_rejected(registry_root: EvidenceRoot) -> None:
 def test_index_and_registry_schema_parity(registry_root: EvidenceRoot) -> None:
     index = build_project_index(registry_root, "hist-001").to_dict()
     registry = json.loads(
-        registry_root.resolve(
-            "tracelane://evidence/registry.json", must_exist=True
-        ).read_text(encoding="utf-8")
+        registry_root.resolve("tracelane://evidence/registry.json", must_exist=True).read_text(
+            encoding="utf-8"
+        )
     )
 
     validate_document("evidence-project-index", index)
@@ -574,9 +843,7 @@ def test_post_cutoff_non_future_candidate_is_rejected(
 ) -> None:
     candidate_path = next(
         path
-        for path in (
-            registry_root.path / "projects" / "hist-001" / "candidates"
-        ).glob("*.json")
+        for path in (registry_root.path / "projects" / "hist-001" / "candidates").glob("*.json")
         if json.loads(path.read_text(encoding="utf-8"))["role"] == "future-control"
     )
     value = json.loads(candidate_path.read_text(encoding="utf-8"))
@@ -591,13 +858,9 @@ def test_post_cutoff_non_future_candidate_is_rejected(
 def _candidate_path_for_fact(root: EvidenceRoot, fact_id: str) -> Path:
     return next(
         path
-        for path in sorted(
-            (root.path / "projects" / "hist-001" / "candidates").glob("*.json")
-        )
+        for path in sorted((root.path / "projects" / "hist-001" / "candidates").glob("*.json"))
         if fact_id
-        in ProjectEvidenceCandidate.from_dict(
-            json.loads(path.read_text(encoding="utf-8"))
-        ).fact_ids
+        in ProjectEvidenceCandidate.from_dict(json.loads(path.read_text(encoding="utf-8"))).fact_ids
     )
 
 
@@ -628,9 +891,7 @@ def _install_lineage(
     candidate = ProjectEvidenceCandidate.from_dict(
         json.loads(candidate_path.read_text(encoding="utf-8"))
     )
-    source = EvidenceBlobStore(root).put_bytes(
-        b"lineage source", "text/plain", "evidence_blob"
-    )
+    source = EvidenceBlobStore(root).put_bytes(b"lineage source", "text/plain", "evidence_blob")
     middle_one = EvidenceBlobStore(root).put_bytes(
         b"lineage middle one", "text/plain", "evidence_blob"
     )
@@ -687,9 +948,7 @@ def _install_lineage(
     assert planned_refs is not None
 
     candidate_refs: list[ArtifactRef] = []
-    for transformation, planned_ref in zip(
-        transformations, planned_refs, strict=True
-    ):
+    for transformation, planned_ref in zip(transformations, planned_refs, strict=True):
         actual_ref = write_json_create_or_match(
             root,
             planned_ref.uri,
@@ -702,9 +961,7 @@ def _install_lineage(
         ref_value.pop("schema_id")
         candidate_refs.append(ArtifactRef.from_dict(ref_value))
     candidate_value = candidate.to_dict()
-    candidate_value["transformation_refs"] = [
-        item.to_dict() for item in candidate_refs
-    ]
+    candidate_value["transformation_refs"] = [item.to_dict() for item in candidate_refs]
     candidate_value["record_sha256"] = candidate_record_digest(candidate_value)
     _rewrite_json(candidate_path, candidate_value)
     return tuple(item.transformation_id for item in transformations)
@@ -742,18 +999,16 @@ def _mutate_candidate_record(root: EvidenceRoot) -> None:
 
 def _mutate_candidate_blob(root: EvidenceRoot) -> None:
     path = _candidate_path_for_fact(root, "fact.1")
-    candidate = ProjectEvidenceCandidate.from_dict(
-        json.loads(path.read_text(encoding="utf-8"))
-    )
+    candidate = ProjectEvidenceCandidate.from_dict(json.loads(path.read_text(encoding="utf-8")))
     root.resolve(candidate.content_ref.uri, must_exist=True).write_bytes(
         b"changed after derivation"
     )
 
 
 def _mutate_inventory(root: EvidenceRoot) -> None:
-    (
-        root.path / "projects" / "hist-001" / "candidates" / "late-entry.txt"
-    ).write_text("changed", encoding="utf-8")
+    (root.path / "projects" / "hist-001" / "candidates" / "late-entry.txt").write_text(
+        "changed", encoding="utf-8"
+    )
 
 
 def _mutate_after_first_snapshot(

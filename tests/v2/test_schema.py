@@ -398,7 +398,11 @@ def test_evidence_registry_schemas_reject_missing_required_and_unknown_fields(
             project_id="hist-001",
             session_id="acq_hist001_20260724",
             manifest_sha256="f" * 64,
-            candidates=(EvidenceImportRow.from_candidate(ProjectEvidenceCandidate.from_dict(registry_candidate_value())),),
+            candidates=(
+                EvidenceImportRow.from_candidate(
+                    ProjectEvidenceCandidate.from_dict(registry_candidate_value())
+                ),
+            ),
         ).to_dict(),
     }
     value = values[schema_name]

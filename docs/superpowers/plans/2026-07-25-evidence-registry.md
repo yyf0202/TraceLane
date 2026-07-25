@@ -349,11 +349,7 @@ Use a single digest helper that excludes only `record_sha256`:
 
 ```python
 def candidate_record_digest(value: Mapping[str, object]) -> str:
-    payload = {
-        str(key): item
-        for key, item in value.items()
-        if key != "record_sha256"
-    }
+    payload = {str(key): item for key, item in value.items() if key != "record_sha256"}
     return sha256_json(payload)
 ```
 

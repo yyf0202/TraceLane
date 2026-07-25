@@ -23,6 +23,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Local v1 migration binds the normalized absolute source root, serializes concurrent publication, publishes each file through a create-new boundary, and authenticates completion with a persisted create-new marker over the copied inventory.
 - Lock files are reauthenticated after OS acquisition and before unlock, and acquisition journals use identity-bound tombstone retirement instead of raw pathname deletion.
 - Initial HIST-001 candidate evidence records provide a project-scoped registry with pending primary-source paraphrases and a future-information control.
+- Evidence registry verification now exercises a table-driven corruption matrix, source and publication races, stale review bindings, future-control filtering, and create-or-match conflict preservation while leaving the v0.2 fixture approval gate closed.
 
 ## [0.1.0] - 2026-07-24
 

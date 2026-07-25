@@ -126,9 +126,7 @@ class EvidenceReview:
     approved_fact_ids: tuple[str, ...]
     approved_domains: tuple[str, ...]
     license_basis: str
-    retention_policy: Literal[
-        "paraphrase_only", "public_domain_full_text", "licensed_full_text"
-    ]
+    retention_policy: Literal["paraphrase_only", "public_domain_full_text", "licensed_full_text"]
     supersedes_review_id: str | None = None
 
     @classmethod
@@ -211,9 +209,7 @@ class EvidenceReview:
             license_basis=str(value["license_basis"]),
             retention_policy=str(value["retention_policy"]),  # type: ignore[arg-type]
             supersedes_review_id=(
-                str(value["supersedes_review_id"])
-                if "supersedes_review_id" in value
-                else None
+                str(value["supersedes_review_id"]) if "supersedes_review_id" in value else None
             ),
         )
         _require_project_id(review.project_id)
@@ -338,9 +334,7 @@ def validate_review_chain(
 
     head = ordered[-1]
     status: EffectiveStatus = (
-        head.decision
-        if head.candidate_record_sha256 == candidate.record_sha256
-        else "pending"
+        head.decision if head.candidate_record_sha256 == candidate.record_sha256 else "pending"
     )
     return ReviewChain(ordered=tuple(ordered), head=head, effective_status=status)
 
@@ -366,10 +360,7 @@ def append_review(root: EvidenceRoot, review: EvidenceReview) -> ArtifactRef:
     if not isinstance(review, EvidenceReview):
         raise ValueError("review record is invalid")
     value = review.to_dict()
-    uri = (
-        f"tracelane://evidence/projects/{review.project_id}/reviews/"
-        f"{review.review_id}.json"
-    )
+    uri = f"tracelane://evidence/projects/{review.project_id}/reviews/{review.review_id}.json"
     return write_json_create_or_match(
         root,
         uri,

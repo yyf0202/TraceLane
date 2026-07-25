@@ -392,10 +392,89 @@ def test_import_revalidates_source_after_snapshot_before_publication(
         mutate_after_initial_snapshot,
     )
 
-    with pytest.raises(ValueError, match="acquisition import source changed"):
+    with pytest.raises(ValueError, match="^acquisition import source changed$"):
         import_acquisition_project(source, target, project, metadata)
 
+    assert _tree_snapshot(target) == {}
+
+
+def test_staged_validation_precedes_project_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=2)
+    original_verify = evidence_importer.verify_evidence_registry
+    rename_calls = 0
+
+    def reject_staged_registry(root: object, project_id: str | None = None):
+        root_path = root.path if hasattr(root, "path") else Path(root)  # type: ignore[arg-type]
+        if ".tracelane-staging" in Path(root_path).parts:
+            raise ValueError("injected staged validation failure")
+        return original_verify(root, project_id)
+
+    def observe_rename(*args: object, **kwargs: object) -> None:
+        nonlocal rename_calls
+        del args, kwargs
+        rename_calls += 1
+        raise AssertionError("project publication preceded staged validation")
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "verify_evidence_registry",
+        reject_staged_registry,
+    )
+    monkeypatch.setattr(evidence_importer.os, "rename", observe_rename)
+
+    with pytest.raises(ValueError, match="^acquisition import metadata is invalid$"):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert rename_calls == 0
     assert not (target / "projects" / "hist-001").exists()
+    assert not (target / "registry.json").exists()
+
+
+def test_project_validation_precedes_global_registry_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=2)
+    original_publish = evidence_importer._publish_registry
+    validation_calls = 0
+    registry_publication_calls = 0
+    rejected_state: dict[str, bytes] = {}
+
+    def reject_published_project(*args: object, **kwargs: object) -> None:
+        nonlocal validation_calls
+        del args, kwargs
+        validation_calls += 1
+        rejected_state.update(_tree_snapshot(target))
+        raise ValueError("evidence import target is invalid")
+
+    def observe_registry_publication(*args: object, **kwargs: object):
+        nonlocal registry_publication_calls
+        registry_publication_calls += 1
+        return original_publish(*args, **kwargs)
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "_authenticate_existing_project",
+        reject_published_project,
+    )
+    monkeypatch.setattr(
+        evidence_importer,
+        "_publish_registry",
+        observe_registry_publication,
+    )
+
+    with pytest.raises(ValueError, match="^evidence import target is invalid$"):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert validation_calls == 1
+    assert registry_publication_calls == 0
+    assert rejected_state
+    assert _tree_snapshot(target) == rejected_state
+    assert (target / "projects" / "hist-001").is_dir()
+    assert not (target / "registry.json").exists()
 
 
 def test_import_revalidates_source_after_project_publication_before_registry(
@@ -422,7 +501,7 @@ def test_import_revalidates_source_after_project_publication_before_registry(
         mutate_after_project_publication,
     )
 
-    with pytest.raises(ValueError, match="acquisition import source changed"):
+    with pytest.raises(ValueError, match="^acquisition import source changed$"):
         import_acquisition_project(source, target, project, metadata)
 
     assert (target / "projects" / "hist-001" / "index.json").is_file()
@@ -470,7 +549,7 @@ def test_import_revalidates_source_after_target_verification_before_return(
         mutate_after_target_verification,
     )
 
-    with pytest.raises(ValueError, match="acquisition import source changed"):
+    with pytest.raises(ValueError, match="^acquisition import source changed$"):
         import_acquisition_project(source, target, project, metadata)
 
     assert (target / "registry.json").is_file()
@@ -623,6 +702,40 @@ def test_project_publication_os_error_never_echoes_local_paths(
     assert str(target) not in str(caught.value)
     rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
     assert str(tmp_path) not in rendered
+
+
+def test_target_namespace_publication_race_preserves_winning_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=2)
+    winning_state: dict[str, bytes] = {}
+    marker = b"published by competing importer\n"
+
+    def publish_competing_project(
+        source_path: str | Path,
+        target_path: str | Path,
+    ) -> None:
+        del source_path
+        final_project = Path(target_path)
+        final_project.mkdir(parents=True)
+        (final_project / "winner.marker").write_bytes(marker)
+        winning_state.update(_tree_snapshot(target))
+        raise FileExistsError("competing project publication won")
+
+    monkeypatch.setattr(
+        evidence_importer.os,
+        "rename",
+        publish_competing_project,
+    )
+
+    with pytest.raises(ValueError, match="^evidence import target changed$"):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert winning_state
+    assert _tree_snapshot(target) == winning_state
+    assert (target / "projects" / "hist-001" / "winner.marker").read_bytes() == marker
+    assert not (target / "registry.json").exists()
 
 
 def test_source_read_os_error_never_echoes_local_paths(

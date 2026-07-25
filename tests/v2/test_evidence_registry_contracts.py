@@ -140,10 +140,7 @@ def test_candidate_transformation_refs_preserve_lineage_order(
     assert candidate.transformation_refs == (later_sort_key, earlier_sort_key)
     with pytest.raises(ValueError, match="transformation_refs"):
         ProjectEvidenceCandidate.create(
-            **(
-                candidate_input
-                | {"transformation_refs": (later_sort_key, later_sort_key)}
-            )
+            **(candidate_input | {"transformation_refs": (later_sort_key, later_sort_key)})
         )
 
 
@@ -227,23 +224,35 @@ def test_transformation_round_trip_and_typed_refs(candidate_input: dict[str, obj
     assert transformation.transformation_id.startswith("transformation_")
 
 
-def test_transformation_rejects_same_or_invalid_typed_refs() -> None:
+@pytest.mark.parametrize(
+    ("changes", "category"),
+    [
+        ({"transformation_type": "unsupported"}, "transformation_type"),
+        ({"input_ref": transformation_ref()}, "input"),
+        ({"output_ref": transformation_ref()}, "output"),
+        ({"output_ref": blob_ref()}, "different"),
+    ],
+    ids=["kind", "input-kind", "output-kind", "input-output"],
+)
+def test_transformation_corruption_matrix_rejects_invalid_wiring(
+    changes: dict[str, object],
+    category: str,
+) -> None:
     common = {
         "project_id": "hist-001",
         "candidate_id": "candidate_" + "a" * 24,
         "transformation_type": "ocr",
         "input_ref": blob_ref(),
-        "output_ref": blob_ref(),
+        "output_ref": blob_ref(digest="d" * 64),
         "actor": "operator-001",
         "method": "OCR",
         "parameters": {},
         "created_at": datetime(2026, 7, 24, tzinfo=UTC),
         "license_implications": "None.",
     }
-    with pytest.raises(ValueError, match="different"):
-        EvidenceTransformation.create(**common)
-    with pytest.raises(ValueError, match="input"):
-        EvidenceTransformation.create(**(common | {"input_ref": transformation_ref()}))
+
+    with pytest.raises(ValueError, match=category):
+        EvidenceTransformation.create(**(common | changes))
 
 
 def test_import_metadata_round_trip(candidate_input: dict[str, object]) -> None:

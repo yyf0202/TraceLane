@@ -33,9 +33,7 @@ _LOCAL_STATE_COMPONENT = re.compile(r"(?i)(?<!\w)\.local(?=$|[\\/])")
 _SOURCE_TYPES = frozenset({"primary", "secondary", "dataset"})
 _ROLES = frozenset({"evidence", "future-control"})
 _AUTHORS = frozenset({"repository_authored", "third_party"})
-_RETENTION = frozenset(
-    {"paraphrase_only", "public_domain_full_text", "licensed_full_text"}
-)
+_RETENTION = frozenset({"paraphrase_only", "public_domain_full_text", "licensed_full_text"})
 _TRANSFORMATION_TYPES = frozenset(
     {"manual_excerpt", "repository_paraphrase", "translation", "ocr", "normalization"}
 )
@@ -57,8 +55,7 @@ def _validate_persisted_text(value: str, label: str) -> str:
 def _contains_local_state_reference(value: object) -> bool:
     if isinstance(value, Mapping):
         return any(
-            _contains_local_state_reference(str(key))
-            or _contains_local_state_reference(item)
+            _contains_local_state_reference(str(key)) or _contains_local_state_reference(item)
             for key, item in value.items()
         )
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
@@ -735,9 +732,8 @@ class EvidenceImportMetadata:
             raise ValueError("session_id is invalid")
         _digest(metadata.manifest_sha256, "manifest_sha256")
         candidate_ids = tuple(item.candidate_id for item in metadata.candidates)
-        if (
-            tuple(sorted(candidate_ids)) != candidate_ids
-            or len(set(candidate_ids)) != len(candidate_ids)
+        if tuple(sorted(candidate_ids)) != candidate_ids or len(set(candidate_ids)) != len(
+            candidate_ids
         ):
             raise ValueError("candidates must be sorted and unique by candidate_id")
         if content_digest(metadata._raw_dict()) != metadata.content_sha256:

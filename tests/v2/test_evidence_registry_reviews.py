@@ -87,9 +87,7 @@ def _review(
     reviewed_at: datetime = datetime(2026, 7, 25, 8, 0, tzinfo=UTC),
 ) -> EvidenceReview:
     if approved_fact_ids is None:
-        approved_fact_ids = (
-            ("logistics.prewar_supply",) if decision == "approved" else ()
-        )
+        approved_fact_ids = ("logistics.prewar_supply",) if decision == "approved" else ()
     if approved_domains is None:
         approved_domains = ("logistics",) if decision == "approved" else ()
     return EvidenceReview.create(
@@ -623,8 +621,7 @@ def test_append_review_is_idempotent_and_uses_exact_uri(
     assert first.kind == "evidence_review"
     assert first.schema_id == "tracelane://schemas/evidence-review/v1"
     assert first.uri == (
-        "tracelane://evidence/projects/hist-001/reviews/"
-        f"{approved_review.review_id}.json"
+        f"tracelane://evidence/projects/hist-001/reviews/{approved_review.review_id}.json"
     )
     assert root.resolve(first.uri).read_bytes().endswith(b"\n")
 
@@ -633,10 +630,7 @@ def test_append_review_never_replaces_existing_different_bytes(
     tmp_path, approved_review: EvidenceReview
 ) -> None:
     root = EvidenceRoot.create(tmp_path / "evidence")
-    uri = (
-        "tracelane://evidence/projects/hist-001/reviews/"
-        f"{approved_review.review_id}.json"
-    )
+    uri = f"tracelane://evidence/projects/hist-001/reviews/{approved_review.review_id}.json"
     target = root.resolve(uri)
     target.parent.mkdir(parents=True)
     original = b'{"different":true}\n'

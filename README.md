@@ -34,6 +34,15 @@ deterministic grades.
 - One-variable context-policy ablations with isolated experiment arms.
 - Offline `demo`, `eval`, `ablate`, and `inspect` commands.
 
+The tracked HIST-001 registry contains nine pending candidates, no approvals or
+reviews, and one post-cutoff future-information control. Verification derives
+project and global indexes from authenticated source inventory, candidate,
+review, transformation, and blob records before accepting persisted indexes.
+
+The public `fixtures/v0.2` package remains intentionally absent and unapproved.
+Its test is a release gate: a missing-fixture failure is expected until a
+separate review explicitly approves and publishes that fixture.
+
 ## Quick start
 
 TraceLane requires Python 3.11 or 3.12.

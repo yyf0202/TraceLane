@@ -25,6 +25,14 @@ def evidence_root(tmp_path: Path) -> EvidenceRoot:
     return EvidenceRoot.create(tmp_path / "evidence")
 
 
+def _tree_snapshot(root: EvidenceRoot) -> dict[str, bytes]:
+    return {
+        path.relative_to(root.path).as_posix(): path.read_bytes()
+        for path in sorted(root.path.rglob("*"))
+        if path.is_file()
+    }
+
+
 @pytest.mark.parametrize(
     ("uri", "relative"),
     [
@@ -307,10 +315,16 @@ def test_blob_store_rejects_existing_different_bytes_without_overwrite(
     target.parent.mkdir(parents=True)
     target.write_bytes(b"conflicting")
 
-    with pytest.raises(ValueError, match="conflict|hash|size"):
+    corrupt_state = _tree_snapshot(evidence_root)
+
+    with pytest.raises(
+        ValueError,
+        match="^evidence blob conflicts with existing content$",
+    ):
         store.put_bytes(data, "text/plain", "evidence_blob")
 
     assert target.read_bytes() == b"conflicting"
+    assert _tree_snapshot(evidence_root) == corrupt_state
 
 
 def test_blob_put_rolls_back_directory_if_root_is_replaced_before_mkdir(
@@ -366,10 +380,18 @@ def test_blob_put_rejects_invalid_media_type_without_echo(
     assert sensitive not in str(captured.value)
 
 
-@pytest.mark.parametrize("damage", ["missing", "truncated", "replaced"])
+@pytest.mark.parametrize(
+    ("damage", "category"),
+    [
+        ("missing", "^evidence path is unavailable$"),
+        ("truncated", "^evidence blob size mismatch$"),
+        ("replaced", "^evidence blob hash mismatch$"),
+    ],
+)
 def test_blob_verify_detects_missing_truncated_or_replaced_bytes(
     evidence_root: EvidenceRoot,
     damage: str,
+    category: str,
 ) -> None:
     store = EvidenceBlobStore(evidence_root)
     reference = store.put_bytes(b"authenticated payload", "text/plain", "evidence_blob")
@@ -383,8 +405,12 @@ def test_blob_verify_detects_missing_truncated_or_replaced_bytes(
         replacement.write_bytes(b"different replacement")
         os.replace(replacement, target)
 
-    with pytest.raises(ValueError, match="unavailable|size|hash"):
+    corrupt_state = _tree_snapshot(evidence_root)
+
+    with pytest.raises(ValueError, match=category):
         store.verify(reference)
+
+    assert _tree_snapshot(evidence_root) == corrupt_state
 
 
 def test_blob_verify_rejects_hardlink_even_when_bytes_match(
@@ -426,9 +452,12 @@ def test_blob_verify_validates_reference_metadata_and_content_properties(
     store = EvidenceBlobStore(evidence_root)
     reference = store.put_bytes(b"payload", "text/plain", "evidence_blob")
     altered = replace(reference, **reference_change)
+    accepted_state = _tree_snapshot(evidence_root)
 
     with pytest.raises(ValueError, match="blob reference|unavailable|size|hash"):
         store.verify(altered)
+
+    assert _tree_snapshot(evidence_root) == accepted_state
 
 
 def test_blob_verify_rejects_stale_open_descriptor(
