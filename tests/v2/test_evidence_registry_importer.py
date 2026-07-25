@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -107,6 +108,16 @@ def _import_case(
         candidates=tuple(sorted(rows, key=lambda item: item.candidate_id)),
     )
     return source, target, _project(), metadata
+
+
+def _tree_snapshot(root: Path) -> dict[str, bytes]:
+    if not root.exists():
+        return {}
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
 
 
 def test_imports_nine_authenticated_candidates_and_verifies_registry(
@@ -247,6 +258,34 @@ def test_import_repairs_valid_registry_that_becomes_stale_after_project_publicat
     assert report.project_id == "hist-001"
 
 
+@pytest.mark.parametrize("direction", ["target-under-source", "source-under-target"])
+def test_import_rejects_overlapping_source_and_target_before_filesystem_mutation(
+    tmp_path: Path,
+    direction: str,
+) -> None:
+    if direction == "target-under-source":
+        source, _, project, metadata = _import_case(tmp_path / "case", count=1)
+        target = source / "nested-evidence"
+        observed_root = source
+    else:
+        target = tmp_path / "outer-target"
+        source, _, project, metadata = _import_case(target, count=1)
+        observed_root = target
+    before = _tree_snapshot(observed_root)
+
+    with pytest.raises(
+        ValueError,
+        match="acquisition import source and target overlap",
+    ) as caught:
+        import_acquisition_project(source, target, project, metadata)
+
+    assert _tree_snapshot(observed_root) == before
+    assert str(source) not in str(caught.value)
+    assert str(target) not in str(caught.value)
+    assert not (observed_root / ".tracelane-locks").exists()
+    assert not (observed_root / ".tracelane-staging").exists()
+
+
 def test_import_rejects_corrupt_existing_registry_without_overwrite(
     tmp_path: Path,
 ) -> None:
@@ -260,6 +299,49 @@ def test_import_rejects_corrupt_existing_registry_without_overwrite(
         import_acquisition_project(source, target, project, metadata)
 
     assert registry_path.read_bytes() == corrupt_bytes
+
+
+@pytest.mark.parametrize("target_state", ["corrupt-registry", "unsupported-entry"])
+def test_import_preflights_invalid_existing_target_before_any_publication(
+    tmp_path: Path,
+    target_state: str,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    target.mkdir()
+    if target_state == "corrupt-registry":
+        (target / "registry.json").write_bytes(b"corrupt")
+    else:
+        (target / "unsupported.bin").write_bytes(b"unsupported")
+    before = _tree_snapshot(target)
+
+    with pytest.raises(ValueError, match="evidence import target is invalid"):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert _tree_snapshot(target) == before
+    assert not (target / "projects").exists()
+    assert not (target / "blobs").exists()
+
+
+def test_import_authenticates_conflicting_project_before_publishing_new_blob(
+    tmp_path: Path,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path / "first", count=1)
+    import_acquisition_project(source, target, project, metadata)
+    other_source, _, _, other_metadata = _import_case(
+        tmp_path / "second",
+        count=1,
+    )
+    before = _tree_snapshot(target)
+
+    with pytest.raises(ValueError, match="evidence import target conflicts"):
+        import_acquisition_project(
+            other_source,
+            target,
+            _project(title="Conflicting HIST-001"),
+            other_metadata,
+        )
+
+    assert _tree_snapshot(target) == before
 
 
 @pytest.mark.parametrize("member", ["project", "index", "blob"])
@@ -494,14 +576,20 @@ def test_interruption_before_project_publication_is_recoverable(
 ) -> None:
     source, target, project, metadata = _import_case(tmp_path, count=2)
     original_rename = evidence_importer.os.rename
+    attempted_source: Path | None = None
 
     def interrupt_rename(source_path: str | Path, target_path: str | Path) -> None:
+        nonlocal attempted_source
+        attempted_source = Path(source_path)
         raise RuntimeError("injected interruption before project publication")
 
     monkeypatch.setattr(evidence_importer.os, "rename", interrupt_rename)
     with pytest.raises(RuntimeError, match="injected interruption"):
         import_acquisition_project(source, target, project, metadata)
     assert not (target / "projects" / "hist-001").exists()
+    assert attempted_source is not None
+    assert attempted_source.parents[2].name == ".tracelane-staging"
+    assert not any(path.name.startswith(".evidence-import-") for path in tmp_path.iterdir())
 
     monkeypatch.setattr(evidence_importer.os, "rename", original_rename)
     report = import_acquisition_project(source, target, project, metadata)
@@ -515,7 +603,13 @@ def test_project_publication_os_error_never_echoes_local_paths(
     source, target, project, metadata = _import_case(tmp_path, count=1)
 
     def fail_with_path(source_path: str | Path, target_path: str | Path) -> None:
-        raise OSError(f"cannot rename {source_path} to {target_path}")
+        raise OSError(
+            13,
+            "rename denied",
+            str(source_path),
+            None,
+            str(target_path),
+        )
 
     monkeypatch.setattr(evidence_importer.os, "rename", fail_with_path)
 
@@ -524,6 +618,101 @@ def test_project_publication_os_error_never_echoes_local_paths(
 
     assert str(source) not in str(caught.value)
     assert str(target) not in str(caught.value)
+    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert str(tmp_path) not in rendered
+
+
+def test_source_read_os_error_never_echoes_local_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_read = evidence_importer.secure_read_bytes
+
+    def fail_source_manifest_read(
+        path: str | Path,
+        *,
+        root: str | Path,
+        label: str,
+    ) -> bytes:
+        if label == "acquisition import manifest":
+            raise OSError(13, "read denied", str(path))
+        return original_read(path, root=root, label=label)
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "secure_read_bytes",
+        fail_source_manifest_read,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="acquisition import source is invalid",
+    ) as caught:
+        import_acquisition_project(source, target, project, metadata)
+
+    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert caught.value.__cause__ is None
+    assert str(tmp_path) not in rendered
+    assert not target.exists()
+
+
+def test_existing_registry_read_os_error_never_echoes_local_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    import_acquisition_project(source, target, project, metadata)
+    before = _tree_snapshot(target)
+    original_read = evidence_importer.secure_read_bytes
+
+    def fail_existing_registry_read(
+        path: str | Path,
+        *,
+        root: str | Path,
+        label: str,
+    ) -> bytes:
+        if label == "evidence import existing registry":
+            raise OSError(13, "read denied", str(path))
+        return original_read(path, root=root, label=label)
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "secure_read_bytes",
+        fail_existing_registry_read,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="evidence import target is invalid",
+    ) as caught:
+        import_acquisition_project(source, target, project, metadata)
+
+    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert caught.value.__cause__ is None
+    assert str(tmp_path) not in rendered
+    assert _tree_snapshot(target) == before
+
+
+def test_staging_cleanup_os_error_never_echoes_local_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+
+    def fail_cleanup(path: str | Path) -> None:
+        raise OSError(13, "cleanup denied", str(path))
+
+    monkeypatch.setattr(evidence_importer.shutil, "rmtree", fail_cleanup)
+
+    with pytest.raises(
+        ValueError,
+        match="evidence import staging cleanup failed",
+    ) as caught:
+        import_acquisition_project(source, target, project, metadata)
+
+    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert str(tmp_path) not in rendered
 
 
 def test_interruption_after_project_publication_repairs_registry_on_rerun(
@@ -585,6 +774,30 @@ def test_import_never_persists_or_echoes_source_absolute_path(
     with pytest.raises(ValueError) as caught:
         import_acquisition_project(source, target, project, bad_metadata)
     assert str(source) not in str(caught.value)
+
+
+def test_import_report_registry_digest_comes_from_final_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_publish = evidence_importer._publish_registry
+
+    def publish_with_untrusted_return(root: object):
+        reference = original_publish(root)  # type: ignore[arg-type]
+        return replace(reference, sha256="f" * 64)
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "_publish_registry",
+        publish_with_untrusted_return,
+    )
+
+    report = import_acquisition_project(source, target, project, metadata)
+
+    verified = verify_evidence_registry(target, "hist-001")
+    assert report.registry_sha256 == verified.registry_sha256
+    assert report.registry_sha256 != "f" * 64
 
 
 def test_import_uses_dedicated_ignored_lock_namespace(tmp_path: Path) -> None:

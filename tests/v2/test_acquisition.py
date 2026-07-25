@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -231,6 +232,75 @@ def test_snapshot_candidates_revalidates_source_before_return(
 
     with pytest.raises(ValueError, match="acquisition source snapshot changed"):
         service.snapshot_candidates()
+
+
+def test_snapshot_candidates_closes_authentication_after_returned_closure_read(
+    service: ManualAcquisitionService,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = ingest_candidate(service, curated_text="authenticated source text")
+    content_path = ArtifactRoot(tmp_path).resolve(candidate.content_ref.uri)
+    original_read = acquisition_service.secure_read_bytes
+    snapshot_content_reads = 0
+
+    def mutate_after_second_snapshot_content_read(
+        path: str | Path,
+        *,
+        root: str | Path | None = None,
+        label: str = "file",
+    ) -> bytes:
+        nonlocal snapshot_content_reads
+        data = original_read(path, root=root, label=label)
+        if label == "acquisition snapshot content":
+            snapshot_content_reads += 1
+            if snapshot_content_reads == 2:
+                content_path.write_bytes(b"mutated after returned closure read")
+        return data
+
+    monkeypatch.setattr(
+        acquisition_service,
+        "secure_read_bytes",
+        mutate_after_second_snapshot_content_read,
+    )
+
+    with pytest.raises(ValueError, match="acquisition source snapshot changed"):
+        service.snapshot_candidates()
+
+
+def test_snapshot_candidates_read_os_error_never_echoes_local_paths(
+    service: ManualAcquisitionService,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ingest_candidate(service, curated_text="authenticated source text")
+    original_read = acquisition_service.secure_read_bytes
+
+    def fail_snapshot_content_read(
+        path: str | Path,
+        *,
+        root: str | Path | None = None,
+        label: str = "file",
+    ) -> bytes:
+        if label == "acquisition snapshot content":
+            raise OSError(13, "read denied", str(path))
+        return original_read(path, root=root, label=label)
+
+    monkeypatch.setattr(
+        acquisition_service,
+        "secure_read_bytes",
+        fail_snapshot_content_read,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="acquisition source snapshot is invalid",
+    ) as caught:
+        service.snapshot_candidates()
+
+    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert caught.value.__cause__ is None
+    assert str(tmp_path) not in rendered
 
 
 def leave_pending_promotion(

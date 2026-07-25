@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -46,6 +47,26 @@ from tracelane.v2.storage import (
 _PROJECT_SCHEMA = "tracelane://schemas/evidence-project/v1"
 _CANDIDATE_SCHEMA = "tracelane://schemas/project-evidence-candidate/v1"
 _REGISTRY_SCHEMA = "tracelane://schemas/evidence-registry/v1"
+_PUBLIC_IMPORT_ERRORS = frozenset(
+    {
+        "acquisition import metadata is invalid",
+        "acquisition import metadata manifest does not match source",
+        "acquisition import source and target are invalid",
+        "acquisition import source and target overlap",
+        "acquisition import source changed",
+        "acquisition import source content is invalid",
+        "acquisition import source content is restricted",
+        "acquisition import source is invalid",
+        "acquisition import source is unavailable",
+        "acquisition transformations are not importable",
+        "evidence import staging cleanup failed",
+        "evidence import staging identity is invalid",
+        "evidence import target changed",
+        "evidence import target conflicts",
+        "evidence import target conflicts with existing project",
+        "evidence import target is invalid",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +90,23 @@ class _AuthenticatedImport:
 
 def _canonical_bytes(value: object) -> bytes:
     return canonical_json(value).encode("utf-8") + b"\n"
+
+
+def _canonical_absolute_path(value: str | Path) -> Path:
+    try:
+        return Path(value).resolve(strict=False)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        raise ValueError("acquisition import source and target are invalid") from None
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    first_key = os.path.normcase(os.path.normpath(str(first)))
+    second_key = os.path.normcase(os.path.normpath(str(second)))
+    try:
+        shared = os.path.commonpath((first_key, second_key))
+    except ValueError:
+        return False
+    return shared in {first_key, second_key}
 
 
 def _source_manifest_sha256(
@@ -301,18 +339,39 @@ def _build_staged_project(
         raise ValueError("acquisition import metadata is invalid") from exc
 
 
-def _safe_remove_stage(stage_path: Path, target_parent: Path, prefix: str) -> None:
+def _target_identity(target: Path) -> str:
+    return hashlib.sha256(
+        os.path.normcase(os.path.normpath(str(target))).encode("utf-8")
+    ).hexdigest()[:24]
+
+
+def _staging_location(target: Path) -> tuple[Path, Path]:
+    namespace = ArtifactRoot(target.parent / ".tracelane-staging").path
+    prefix = f"{target.name}-{_target_identity(target)}-"
+    return namespace, namespace / f"{prefix}{uuid.uuid4().hex}"
+
+
+def _safe_remove_stage(
+    stage_path: Path,
+    staging_namespace: Path,
+    target: Path,
+) -> None:
+    expected_namespace = target.parent / ".tracelane-staging"
+    prefix = f"{target.name}-{_target_identity(target)}-"
+    suffix = stage_path.name.removeprefix(prefix)
     if (
-        stage_path.parent != target_parent
+        staging_namespace != expected_namespace
+        or stage_path.parent != staging_namespace
         or not stage_path.name.startswith(prefix)
+        or re.fullmatch(r"[0-9a-f]{32}", suffix) is None
         or stage_path.is_symlink()
     ):
         raise ValueError("evidence import staging identity is invalid")
     if stage_path.exists():
         try:
             shutil.rmtree(stage_path)
-        except OSError as exc:
-            raise ValueError("evidence import staging cleanup failed") from exc
+        except OSError:
+            raise ValueError("evidence import staging cleanup failed") from None
 
 
 def _authenticate_existing_project(
@@ -348,6 +407,53 @@ def _authenticate_existing_project(
             raise ValueError("existing project differs")
     except (OSError, TypeError, ValueError) as exc:
         raise ValueError("evidence import target conflicts with existing project") from exc
+
+
+def _validate_existing_registry(
+    root: EvidenceRoot,
+    expected: EvidenceRegistry,
+) -> None:
+    registry_path = root.resolve("tracelane://evidence/registry.json")
+    if not registry_path.exists():
+        return
+    data = secure_read_bytes(
+        registry_path,
+        root=root.path,
+        label="evidence import existing registry",
+    )
+    value = json.loads(data.decode("utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("existing registry must be an object")
+    parsed = EvidenceRegistry.from_dict(value)
+    if data != _canonical_bytes(parsed.to_dict()):
+        raise ValueError("existing registry is not canonical")
+    expected_entries = {item.project_id: item for item in expected.projects}
+    if any(expected_entries.get(item.project_id) != item for item in parsed.projects):
+        raise ValueError("existing registry is not a recoverable stale registry")
+
+
+def _preflight_existing_target(
+    target_path: Path,
+    project: EvidenceProject,
+    expected_index: EvidenceProjectIndex,
+) -> tuple[EvidenceRoot | None, bool]:
+    try:
+        target_path.lstat()
+    except FileNotFoundError:
+        return None, False
+    except OSError:
+        raise ValueError("evidence import target is invalid") from None
+    try:
+        root = EvidenceRoot.open(target_path)
+        expected_registry = build_registry(root)
+        _validate_existing_registry(root, expected_registry)
+    except (OSError, TypeError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise ValueError("evidence import target is invalid") from None
+    final_project = root.path / "projects" / project.project_id
+    if final_project.exists():
+        _authenticate_existing_project(root, project, expected_index)
+        return root, True
+    return root, False
 
 
 def _publish_registry(root: EvidenceRoot) -> ArtifactRef:
@@ -418,12 +524,119 @@ def _publish_registry(root: EvidenceRoot) -> ArtifactRef:
 
 
 def _target_lock_path(target: Path) -> Path:
-    absolute = Path(os.path.abspath(target))
-    identity = hashlib.sha256(
-        os.path.normcase(os.path.normpath(str(absolute))).encode("utf-8")
-    ).hexdigest()[:24]
-    lock_root = ArtifactRoot(absolute.parent / ".tracelane-locks")
-    return lock_root.path / ".locks" / f"evidence-import-{identity}.lock"
+    lock_root = ArtifactRoot(target.parent / ".tracelane-locks")
+    return lock_root.path / ".locks" / f"evidence-import-{_target_identity(target)}.lock"
+
+
+def _import_acquisition_project(
+    source_root: str | Path,
+    target_root: str | Path,
+    project: EvidenceProject,
+    metadata: EvidenceImportMetadata,
+) -> EvidenceImportReport:
+    project, metadata = _validated_inputs(project, metadata)
+    source_path = _canonical_absolute_path(source_root)
+    target_path = _canonical_absolute_path(target_root)
+    if _paths_overlap(source_path, target_path):
+        raise ValueError("acquisition import source and target overlap")
+    service, authenticated = _authenticate_source(source_path, metadata)
+    with exclusive_file_lock(_target_lock_path(target_path), blocking=True):
+        staging_namespace, stage_path = _staging_location(target_path)
+        try:
+            stage, expected_index = _build_staged_project(
+                stage_path,
+                project,
+                authenticated,
+                metadata.session_id,
+            )
+            _assert_source_unchanged(
+                service,
+                source_path,
+                authenticated,
+                metadata.session_id,
+            )
+
+            target, project_exists = _preflight_existing_target(
+                target_path,
+                project,
+                expected_index,
+            )
+            try:
+                target = target or EvidenceRoot.create(target_path)
+                target_blobs = EvidenceBlobStore(target)
+                for closure in authenticated.closures:
+                    target_blobs.put_bytes(
+                        closure.content_bytes,
+                        closure.candidate.content_ref.media_type,
+                        "evidence_blob",
+                    )
+            except (OSError, TypeError, ValueError) as exc:
+                raise ValueError("evidence import target conflicts") from exc
+
+            final_project = target.path / "projects" / project.project_id
+            target.ensure_parent(final_project)
+            if project_exists:
+                _authenticate_existing_project(
+                    target,
+                    project,
+                    expected_index,
+                )
+            else:
+                try:
+                    os.rename(
+                        stage.path / "projects" / project.project_id,
+                        final_project,
+                    )
+                except OSError:
+                    raise ValueError("evidence import target changed") from None
+                _authenticate_existing_project(
+                    target,
+                    project,
+                    expected_index,
+                )
+            _assert_source_unchanged(
+                service,
+                source_path,
+                authenticated,
+                metadata.session_id,
+            )
+            _publish_registry(target)
+            _assert_source_unchanged(
+                service,
+                source_path,
+                authenticated,
+                metadata.session_id,
+            )
+            verified = verify_evidence_registry(target, project.project_id)
+            if verified.project_index_sha256 is None:
+                raise ValueError("evidence import target is invalid")
+            _assert_source_unchanged(
+                service,
+                source_path,
+                authenticated,
+                metadata.session_id,
+            )
+            return EvidenceImportReport(
+                project_id=project.project_id,
+                candidate_count=len(authenticated.closures),
+                pending_count=expected_index.status_counts["pending"],
+                future_control_count=sum(
+                    item.role == "future-control" for item in expected_index.entries
+                ),
+                source_manifest_sha256=authenticated.manifest_sha256,
+                project_index_sha256=verified.project_index_sha256,
+                registry_sha256=verified.registry_sha256,
+                source_candidate_ids=tuple(
+                    item.candidate.candidate_id for item in authenticated.closures
+                ),
+            )
+        finally:
+            if stage_path.exists() or stage_path.is_symlink():
+                _safe_remove_stage(
+                    stage_path,
+                    staging_namespace,
+                    target_path,
+                )
 
 
 def import_acquisition_project(
@@ -432,105 +645,17 @@ def import_acquisition_project(
     project: EvidenceProject,
     metadata: EvidenceImportMetadata,
 ) -> EvidenceImportReport:
-    project, metadata = _validated_inputs(project, metadata)
-    source_path = Path(os.path.abspath(source_root))
-    target_path = Path(os.path.abspath(target_root))
-    if os.path.normcase(os.path.normpath(source_path)) == os.path.normcase(
-        os.path.normpath(target_path)
-    ):
-        raise ValueError("acquisition import source and target are invalid")
-    service, authenticated = _authenticate_source(source_path, metadata)
-    prefix = f".{target_path.name}-import-"
-    stage_path = target_path.parent / f"{prefix}{uuid.uuid4().hex}"
-
     try:
-        with exclusive_file_lock(_target_lock_path(target_path), blocking=True):
-            stage, expected_index = _build_staged_project(
-                stage_path,
-                project,
-                authenticated,
-                metadata.session_id,
-            )
-            try:
-                _assert_source_unchanged(
-                    service,
-                    source_path,
-                    authenticated,
-                    metadata.session_id,
-                )
-
-                try:
-                    target = EvidenceRoot.create(target_path)
-                    target_blobs = EvidenceBlobStore(target)
-                    for closure in authenticated.closures:
-                        target_blobs.put_bytes(
-                            closure.content_bytes,
-                            closure.candidate.content_ref.media_type,
-                            "evidence_blob",
-                        )
-                except (OSError, TypeError, ValueError) as exc:
-                    raise ValueError("evidence import target conflicts") from exc
-
-                final_project = target.path / "projects" / project.project_id
-                target.ensure_parent(final_project)
-                if final_project.exists():
-                    _authenticate_existing_project(
-                        target,
-                        project,
-                        expected_index,
-                    )
-                else:
-                    try:
-                        os.rename(
-                            stage.path / "projects" / project.project_id,
-                            final_project,
-                        )
-                    except OSError as exc:
-                        raise ValueError("evidence import target changed") from exc
-                    _authenticate_existing_project(
-                        target,
-                        project,
-                        expected_index,
-                    )
-                _assert_source_unchanged(
-                    service,
-                    source_path,
-                    authenticated,
-                    metadata.session_id,
-                )
-                registry_ref = _publish_registry(target)
-                _assert_source_unchanged(
-                    service,
-                    source_path,
-                    authenticated,
-                    metadata.session_id,
-                )
-                verified = verify_evidence_registry(target, project.project_id)
-                if verified.project_index_sha256 is None:
-                    raise ValueError("evidence import target is invalid")
-                _assert_source_unchanged(
-                    service,
-                    source_path,
-                    authenticated,
-                    metadata.session_id,
-                )
-                return EvidenceImportReport(
-                    project_id=project.project_id,
-                    candidate_count=len(authenticated.closures),
-                    pending_count=expected_index.status_counts["pending"],
-                    future_control_count=sum(
-                        item.role == "future-control" for item in expected_index.entries
-                    ),
-                    source_manifest_sha256=authenticated.manifest_sha256,
-                    project_index_sha256=verified.project_index_sha256,
-                    registry_sha256=registry_ref.sha256,
-                    source_candidate_ids=tuple(
-                        item.candidate.candidate_id for item in authenticated.closures
-                    ),
-                )
-            finally:
-                _safe_remove_stage(stage_path, target_path.parent, prefix)
-    except ValueError:
-        if stage_path.exists():
-            _safe_remove_stage(stage_path, target_path.parent, prefix)
-        raise
+        return _import_acquisition_project(
+            source_root,
+            target_root,
+            project,
+            metadata,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message not in _PUBLIC_IMPORT_ERRORS:
+            message = "evidence import failed"
+        raise ValueError(message) from None
+    except (OSError, TypeError):
+        raise ValueError("evidence import failed") from None

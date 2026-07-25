@@ -735,21 +735,46 @@ class ManualAcquisitionService:
             )
         return manifest_bytes, tuple(closures)
 
-    def snapshot_candidates(self) -> tuple[AcquisitionCandidateClosure, ...]:
+    def _snapshot_candidates(self) -> tuple[AcquisitionCandidateClosure, ...]:
         with self._session_lock():
             try:
                 self._reload_session_state()
                 initial = self._snapshot_candidates_locked()
-            except ValueError as exc:
-                raise ValueError("acquisition source snapshot is invalid") from exc
+            except (OSError, TypeError, ValueError):
+                raise ValueError("acquisition source snapshot is invalid") from None
             try:
                 self._reload_session_state()
                 final = self._snapshot_candidates_locked()
-            except ValueError as exc:
-                raise ValueError("acquisition source snapshot changed") from exc
+            except (OSError, TypeError, ValueError):
+                raise ValueError("acquisition source snapshot changed") from None
             if final != initial:
                 raise ValueError("acquisition source snapshot changed")
+            try:
+                self._reload_session_state()
+                closing_manifest = secure_read_bytes(
+                    self._manifest_path,
+                    root=self._root.path,
+                    label="acquisition snapshot closing manifest",
+                )
+            except (OSError, TypeError, ValueError):
+                raise ValueError("acquisition source snapshot changed") from None
+            if closing_manifest != final[0] or closing_manifest != _json_bytes(self._manifest):
+                raise ValueError("acquisition source snapshot changed")
             return final[1]
+
+    def snapshot_candidates(self) -> tuple[AcquisitionCandidateClosure, ...]:
+        try:
+            return self._snapshot_candidates()
+        except ValueError as exc:
+            message = str(exc)
+            if message not in {
+                "acquisition source snapshot changed",
+                "acquisition source snapshot is invalid",
+            }:
+                message = "acquisition source snapshot is invalid"
+            raise ValueError(message) from None
+        except (OSError, TypeError):
+            raise ValueError("acquisition source snapshot is invalid") from None
 
     def _write_or_load_candidate(
         self,

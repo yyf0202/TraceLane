@@ -17,3 +17,4 @@ artifacts/
 .DS_Store
 Thumbs.db
 /.tracelane-locks/
+/.tracelane-staging/
