@@ -18,7 +18,10 @@ from tracelane.evidence_registry.contracts import (
     EvidenceProject,
 )
 from tracelane.evidence_registry.importer import import_acquisition_project
-from tracelane.evidence_registry.index import verify_evidence_registry
+from tracelane.evidence_registry.index import (
+    rebuild_evidence_indexes,
+    verify_evidence_registry,
+)
 from tracelane.security import RedactedPayload
 from tracelane.v2.storage import ArtifactRoot, BlobStore
 
@@ -806,4 +809,12 @@ def test_import_uses_dedicated_ignored_lock_namespace(tmp_path: Path) -> None:
     import_acquisition_project(source, target, project, metadata)
 
     assert not (tmp_path / ".locks").exists()
-    assert tuple((tmp_path / ".tracelane-locks" / ".locks").glob("*.lock"))
+    lock_root = tmp_path / ".tracelane-locks" / ".locks"
+    import_locks = tuple(lock_root.glob("*.lock"))
+    assert import_locks
+
+    (target / "projects" / "hist-001" / "index.json").unlink()
+    (target / "registry.json").unlink()
+    rebuild_evidence_indexes(target, "hist-001")
+
+    assert tuple(lock_root.glob("*.lock")) == import_locks

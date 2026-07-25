@@ -10,13 +10,9 @@ from tracelane.contracts import HarnessConfig, canonical_json
 from tracelane.evidence_registry import (
     EvidenceIndexEntry,
     EvidenceQuery,
-    EvidenceRoot,
     VerificationReport,
-    build_project_index,
-    build_registry,
     find_evidence,
-    rebuild_project_index,
-    rebuild_registry,
+    rebuild_evidence_indexes,
     verify_evidence_registry,
 )
 from tracelane.experiments.runner import (
@@ -180,22 +176,10 @@ def _print_verification(report: VerificationReport, *, as_json: bool) -> None:
 
 
 def _rebuild_evidence(root_path: Path, project_id: str) -> dict[str, str]:
-    root = EvidenceRoot.open(root_path)
-    index_path = root.resolve(f"tracelane://evidence/projects/{project_id}/index.json")
-    registry_path = root.resolve("tracelane://evidence/registry.json")
-    if not index_path.exists() and registry_path.exists():
-        raise ValueError("evidence derived state conflicts")
-
-    build_project_index(root, project_id)
-    index_ref = rebuild_project_index(root, project_id)
-    build_registry(root)
-    registry_ref = rebuild_registry(root)
-    report = verify_evidence_registry(root, project_id)
-    if (
-        report.project_index_sha256 != index_ref.sha256
-        or report.registry_sha256 != registry_ref.sha256
-    ):
-        raise ValueError("evidence derived state changed")
+    index_ref, registry_ref = rebuild_evidence_indexes(
+        root_path,
+        project_id,
+    )
     return {
         "project_id": project_id,
         "project_index_sha256": index_ref.sha256,

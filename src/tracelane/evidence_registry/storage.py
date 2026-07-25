@@ -5,20 +5,43 @@ import json
 import os
 import re
 import stat
-from collections.abc import Mapping
-from contextlib import suppress
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from tracelane.contracts import canonical_json
 from tracelane.security import assert_safe_tree
 from tracelane.v2.contracts import ArtifactRef
-from tracelane.v2.storage import atomic_create_bytes, secure_read_bytes
+from tracelane.v2.locking import exclusive_file_lock
+from tracelane.v2.storage import (
+    ArtifactRoot,
+    atomic_create_bytes,
+    secure_read_bytes,
+)
 
 _EVIDENCE_PREFIX = "tracelane://evidence/"
 _MAX_DISK_COMPONENT_CHARS = 255
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _URI_COMPONENT = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+
+def evidence_root_identity(target: str | Path) -> str:
+    normalized = _absolute(target)
+    return hashlib.sha256(
+        os.path.normcase(os.path.normpath(str(normalized))).encode("utf-8")
+    ).hexdigest()[:24]
+
+
+@contextmanager
+def evidence_root_mutation_lock(target: str | Path) -> Iterator[None]:
+    normalized = _absolute(target)
+    lock_root = ArtifactRoot(normalized.parent / ".tracelane-locks")
+    lock_path = (
+        lock_root.path / ".locks" / f"evidence-import-{evidence_root_identity(normalized)}.lock"
+    )
+    with exclusive_file_lock(lock_path, blocking=True):
+        yield
 
 
 def _is_link_or_reparse(metadata: os.stat_result) -> bool:
@@ -247,14 +270,11 @@ if os.name == "nt":
     def _windows_open_directory_path(path: Path) -> tuple[int, tuple[int, int]]:
         handle = _WINDOWS_KERNEL32.CreateFileW(
             str(path),
-            _WINDOWS_FILE_LIST_DIRECTORY
-            | _WINDOWS_FILE_READ_ATTRIBUTES
-            | _WINDOWS_SYNCHRONIZE,
+            _WINDOWS_FILE_LIST_DIRECTORY | _WINDOWS_FILE_READ_ATTRIBUTES | _WINDOWS_SYNCHRONIZE,
             _WINDOWS_SHARE_ALL,
             None,
             _WINDOWS_OPEN_EXISTING,
-            _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
-            | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+            _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
             None,
         )
         handle_value = int(handle)
@@ -577,11 +597,7 @@ class EvidenceRoot:
         if parts == ["registry.json"] or is_project_document or is_project_record:
             pass
         elif parts[0] == "blobs":
-            if (
-                len(parts) != 3
-                or parts[1] != "sha256"
-                or _SHA256.fullmatch(parts[2]) is None
-            ):
+            if len(parts) != 3 or parts[1] != "sha256" or _SHA256.fullmatch(parts[2]) is None:
                 raise ValueError("evidence URI is unsafe")
             digest = parts[2]
             physical_parts = ["blobs", "sha256", digest[:2], f"{digest}.blob"]

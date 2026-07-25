@@ -32,11 +32,12 @@ from tracelane.evidence_registry.index import (
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
     EvidenceRoot,
+    evidence_root_identity,
+    evidence_root_mutation_lock,
     write_json_create_or_match,
 )
 from tracelane.security import classify_and_redact
 from tracelane.v2.contracts import ArtifactRef, content_digest
-from tracelane.v2.locking import exclusive_file_lock
 from tracelane.v2.schema import validate_document
 from tracelane.v2.storage import (
     ArtifactRoot,
@@ -339,15 +340,9 @@ def _build_staged_project(
         raise ValueError("acquisition import metadata is invalid") from exc
 
 
-def _target_identity(target: Path) -> str:
-    return hashlib.sha256(
-        os.path.normcase(os.path.normpath(str(target))).encode("utf-8")
-    ).hexdigest()[:24]
-
-
 def _staging_location(target: Path) -> tuple[Path, Path]:
     namespace = ArtifactRoot(target.parent / ".tracelane-staging").path
-    prefix = f"{target.name}-{_target_identity(target)}-"
+    prefix = f"{target.name}-{evidence_root_identity(target)}-"
     return namespace, namespace / f"{prefix}{uuid.uuid4().hex}"
 
 
@@ -357,7 +352,7 @@ def _safe_remove_stage(
     target: Path,
 ) -> None:
     expected_namespace = target.parent / ".tracelane-staging"
-    prefix = f"{target.name}-{_target_identity(target)}-"
+    prefix = f"{target.name}-{evidence_root_identity(target)}-"
     suffix = stage_path.name.removeprefix(prefix)
     if (
         staging_namespace != expected_namespace
@@ -523,11 +518,6 @@ def _publish_registry(root: EvidenceRoot) -> ArtifactRef:
         raise ValueError("evidence import target is invalid") from exc
 
 
-def _target_lock_path(target: Path) -> Path:
-    lock_root = ArtifactRoot(target.parent / ".tracelane-locks")
-    return lock_root.path / ".locks" / f"evidence-import-{_target_identity(target)}.lock"
-
-
 def _import_acquisition_project(
     source_root: str | Path,
     target_root: str | Path,
@@ -540,7 +530,7 @@ def _import_acquisition_project(
     if _paths_overlap(source_path, target_path):
         raise ValueError("acquisition import source and target overlap")
     service, authenticated = _authenticate_source(source_path, metadata)
-    with exclusive_file_lock(_target_lock_path(target_path), blocking=True):
+    with evidence_root_mutation_lock(target_path):
         staging_namespace, stage_path = _staging_location(target_path)
         try:
             stage, expected_index = _build_staged_project(

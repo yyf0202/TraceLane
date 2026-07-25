@@ -20,6 +20,7 @@ from tracelane.evidence_registry.index import (
     build_project_index,
     build_registry,
     find_evidence,
+    rebuild_evidence_indexes,
     rebuild_project_index,
     rebuild_registry,
     verify_evidence_registry,
@@ -35,6 +36,7 @@ from tracelane.evidence_registry.reviews import (
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
     EvidenceRoot,
+    evidence_root_mutation_lock,
     read_json_object,
     write_json_create_or_match,
 )
@@ -62,9 +64,11 @@ __all__ = [
     "candidate_record_digest",
     "current_review",
     "effective_status",
+    "evidence_root_mutation_lock",
     "find_evidence",
     "import_acquisition_project",
     "read_json_object",
+    "rebuild_evidence_indexes",
     "rebuild_project_index",
     "rebuild_registry",
     "validate_review_chain",

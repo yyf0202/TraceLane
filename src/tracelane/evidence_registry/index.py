@@ -35,6 +35,7 @@ from tracelane.evidence_registry.storage import (
     EvidenceRoot,
     _is_link_or_reparse,
     _secure_read,
+    evidence_root_mutation_lock,
     read_json_object,
     write_json_create_or_match,
 )
@@ -51,15 +52,9 @@ _CANDIDATE_ID = re.compile(r"^candidate_[0-9a-f]{24}$")
 _REVIEW_ID = re.compile(r"^review_[0-9a-f]{24}$")
 _TRANSFORMATION_ID = re.compile(r"^transformation_[0-9a-f]{24}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_SAFE_URI = re.compile(
-    r"^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
-)
-_PROJECT_URI = re.compile(
-    r"^tracelane://evidence/projects/([a-z][a-z0-9-]{2,63})/project\.json$"
-)
-_INDEX_URI = re.compile(
-    r"^tracelane://evidence/projects/([a-z][a-z0-9-]{2,63})/index\.json$"
-)
+_SAFE_URI = re.compile(r"^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$")
+_PROJECT_URI = re.compile(r"^tracelane://evidence/projects/([a-z][a-z0-9-]{2,63})/project\.json$")
+_INDEX_URI = re.compile(r"^tracelane://evidence/projects/([a-z][a-z0-9-]{2,63})/index\.json$")
 _CANDIDATE_URI = re.compile(
     r"^tracelane://evidence/projects/([a-z][a-z0-9-]{2,63})/candidates/"
     r"(candidate_[0-9a-f]{24})\.json$"
@@ -72,24 +67,17 @@ _STATUSES = ("pending", "approved", "rejected", "superseded")
 _STATUS_SET = frozenset(_STATUSES)
 _SOURCE_TYPES = frozenset({"primary", "secondary", "dataset"})
 _ROLES = frozenset({"evidence", "future-control"})
-_LICENSE_CLASSES = frozenset(
-    {"paraphrase_only", "public_domain_full_text", "licensed_full_text"}
-)
+_LICENSE_CLASSES = frozenset({"paraphrase_only", "public_domain_full_text", "licensed_full_text"})
 _PROJECT_STATUSES = frozenset({"active", "paused", "completed", "archived"})
 
 
 def _preflight_copy(value: object, key: str | None = None) -> object:
     if isinstance(value, Mapping):
-        return {
-            item_key: _preflight_copy(item, str(item_key))
-            for item_key, item in value.items()
-        }
+        return {item_key: _preflight_copy(item, str(item_key)) for item_key, item in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         return [_preflight_copy(item, key) for item in value]
     if isinstance(value, str):
-        if key in {"record_sha256", "content_sha256", "sha256"} and _SHA256.fullmatch(
-            value
-        ):
+        if key in {"record_sha256", "content_sha256", "sha256"} and _SHA256.fullmatch(value):
             return "derived-digest"
         if key == "candidate_id" and _CANDIDATE_ID.fullmatch(value):
             return "derived-candidate"
@@ -175,9 +163,7 @@ class EvidenceIndexEntry:
     domains: tuple[str, ...]
     fact_ids: tuple[str, ...]
     content_sha256: str
-    license_class: Literal[
-        "paraphrase_only", "public_domain_full_text", "licensed_full_text"
-    ]
+    license_class: Literal["paraphrase_only", "public_domain_full_text", "licensed_full_text"]
     transformation_ids: tuple[str, ...]
 
     @classmethod
@@ -215,9 +201,7 @@ class EvidenceIndexEntry:
             raise ValueError("current review reference is invalid")
         review_value = value.get("current_review_ref")
         review_ref = (
-            _artifact_ref(review_value, "current review")
-            if review_value is not None
-            else None
+            _artifact_ref(review_value, "current review") if review_value is not None else None
         )
         if review_ref is not None:
             review_match = _validate_json_ref(
@@ -266,10 +250,7 @@ class EvidenceIndexEntry:
         _digest(entry.content_sha256, "content_sha256")
         if entry.license_class not in _LICENSE_CLASSES:
             raise ValueError("license_class is invalid")
-        if any(
-            _TRANSFORMATION_ID.fullmatch(item) is None
-            for item in entry.transformation_ids
-        ):
+        if any(_TRANSFORMATION_ID.fullmatch(item) is None for item in entry.transformation_ids):
             raise ValueError("transformation_ids is invalid")
         return entry
 
@@ -311,8 +292,7 @@ class EvidenceProjectIndex:
     ) -> EvidenceProjectIndex:
         values = tuple(entries)
         counts = {
-            status: sum(item.effective_status == status for item in values)
-            for status in _STATUSES
+            status: sum(item.effective_status == status for item in values) for status in _STATUSES
         }
         raw: dict[str, object] = {
             "schema_id": _PROJECT_INDEX_SCHEMA,
@@ -333,9 +313,7 @@ class EvidenceProjectIndex:
         except (TypeError, ValueError) as exc:
             raise ValueError("project index record is invalid") from exc
         entries_value = value["entries"]
-        if isinstance(entries_value, (str, bytes)) or not isinstance(
-            entries_value, Sequence
-        ):
+        if isinstance(entries_value, (str, bytes)) or not isinstance(entries_value, Sequence):
             raise ValueError("project index entries are invalid")
         entries = tuple(EvidenceIndexEntry.from_dict(item) for item in entries_value)
         counts_value = value["status_counts"]
@@ -352,9 +330,7 @@ class EvidenceProjectIndex:
         )
         _require_project_id(index.project_id)
         identifiers = tuple(item.candidate_id for item in index.entries)
-        if identifiers != tuple(sorted(identifiers)) or len(set(identifiers)) != len(
-            identifiers
-        ):
+        if identifiers != tuple(sorted(identifiers)) or len(set(identifiers)) != len(identifiers):
             raise ValueError("project index entries must be sorted and unique")
         for entry in index.entries:
             match = _CANDIDATE_URI.fullmatch(entry.candidate_ref.uri)
@@ -386,9 +362,7 @@ class EvidenceProjectIndex:
             "record_sha256": self.record_sha256,
             "project_id": self.project_id,
             "entries": [item.to_dict() for item in self.entries],
-            "status_counts": {
-                status: self.status_counts[status] for status in _STATUSES
-            },
+            "status_counts": {status: self.status_counts[status] for status in _STATUSES},
         }
 
     def to_dict(self) -> dict[str, object]:
@@ -483,24 +457,19 @@ class EvidenceRegistry:
         except (TypeError, ValueError) as exc:
             raise ValueError("evidence registry record is invalid") from exc
         projects_value = value["projects"]
-        if isinstance(projects_value, (str, bytes)) or not isinstance(
-            projects_value, Sequence
-        ):
+        if isinstance(projects_value, (str, bytes)) or not isinstance(projects_value, Sequence):
             raise ValueError("evidence registry projects are invalid")
         registry = cls(
             schema_id=_text(value["schema_id"], "schema_id"),
             schema_version=_text(value["schema_version"], "schema_version"),
             record_sha256=_text(value["record_sha256"], "record_sha256"),
-            projects=tuple(
-                EvidenceRegistryEntry.from_dict(item) for item in projects_value
-            ),
+            projects=tuple(EvidenceRegistryEntry.from_dict(item) for item in projects_value),
         )
         identifiers = tuple(item.project_id for item in registry.projects)
         project_uris = tuple(item.project_ref.uri for item in registry.projects)
         index_uris = tuple(item.index_ref.uri for item in registry.projects)
         if identifiers != tuple(sorted(identifiers)) or any(
-            len(set(values)) != len(values)
-            for values in (identifiers, project_uris, index_uris)
+            len(set(values)) != len(values) for values in (identifiers, project_uris, index_uris)
         ):
             raise ValueError("evidence registry projects must be sorted and unique")
         _digest(registry.record_sha256, "record_sha256")
@@ -608,11 +577,7 @@ def _managed_json_files(project_dir: Path, name: str) -> tuple[Path, ...]:
     values: list[Path] = []
     for path in _directory_children(directory, f"{name} inventory"):
         metadata = _metadata(path, f"{name} inventory")
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_nlink != 1
-            or path.suffix != ".json"
-        ):
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or path.suffix != ".json":
             raise ValueError(f"{name} inventory contains an unsupported entry")
         values.append(path)
     return tuple(values)
@@ -799,10 +764,7 @@ def _load_records(
         if review.review_id in review_ids:
             raise ValueError("review inventory contains duplicate IDs")
         review_ids.add(review.review_id)
-        if (
-            review.project_id != files.project_id
-            or path.name != f"{review.review_id}.json"
-        ):
+        if review.project_id != files.project_id or path.name != f"{review.review_id}.json":
             raise ValueError("review inventory identity is invalid")
         reviews.append((review, reference))
 
@@ -899,17 +861,11 @@ def _validate_closure(
             consumed_transformations[transformation_id] += 1
             blob_store.verify(transformation.input_ref)
             blob_store.verify(transformation.output_ref)
-            if (
-                previous_output is not None
-                and previous_output != transformation.input_ref
-            ):
+            if previous_output is not None and previous_output != transformation.input_ref:
                 raise ValueError("candidate transformation lineage is disconnected")
             previous_output = transformation.output_ref
             transformation_ids.append(transformation_id)
-        if (
-            candidate.transformation_refs
-            and previous_output != candidate.content_ref
-        ):
+        if candidate.transformation_refs and previous_output != candidate.content_ref:
             raise ValueError("candidate transformation lineage is disconnected")
 
         candidate_reviews = reviews_by_candidate[candidate.candidate_id]
@@ -968,9 +924,7 @@ def _load_project_snapshot(
     files: _ProjectFiles | None = None,
 ) -> _ProjectSnapshot:
     files = files or _discover_project(root, project_id)
-    project, project_ref, candidates, reviews, transformations = _load_records(
-        root, files
-    )
+    project, project_ref, candidates, reviews, transformations = _load_records(root, files)
     expected = _validate_closure(
         root,
         project,
@@ -991,6 +945,25 @@ def _load_project_snapshot(
 
 def _canonical_bytes(value: Mapping[str, object]) -> bytes:
     return canonical_json(value).encode("utf-8") + b"\n"
+
+
+def _json_reference(
+    uri: str,
+    kind: str,
+    schema_id: str,
+    value: Mapping[str, object],
+) -> ArtifactRef:
+    data = _canonical_bytes(value)
+    return ArtifactRef.from_dict(
+        {
+            "kind": kind,
+            "uri": uri,
+            "media_type": "application/json",
+            "schema_id": schema_id,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+        }
+    )
 
 
 def _read_persisted_index(
@@ -1018,24 +991,41 @@ def _read_persisted_index(
 
 def _derive_registry_once(
     root: EvidenceRoot,
+    index_overrides: Mapping[str, ArtifactRef] | None = None,
 ) -> tuple[
     EvidenceRegistry,
     tuple[_ProjectSnapshot, ...],
     Mapping[str, ArtifactRef],
 ]:
+    overrides = dict(index_overrides or {})
     project_ids = _discover_project_ids(root)
+    if set(overrides) - set(project_ids):
+        raise ValueError("evidence registry override is invalid")
     files = tuple(_discover_project(root, project_id) for project_id in project_ids)
-    snapshots = tuple(
-        _load_project_snapshot(root, item.project_id, item) for item in files
-    )
+    snapshots = tuple(_load_project_snapshot(root, item.project_id, item) for item in files)
     index_refs: dict[str, ArtifactRef] = {}
     entries: list[EvidenceRegistryEntry] = []
     for snapshot in snapshots:
-        index_ref = _read_persisted_index(
-            root,
-            snapshot.project.project_id,
-            snapshot.expected_index,
-        )
+        index_ref = overrides.get(snapshot.project.project_id)
+        if index_ref is None:
+            index_ref = _read_persisted_index(
+                root,
+                snapshot.project.project_id,
+                snapshot.expected_index,
+            )
+        else:
+            expected_ref = _json_reference(
+                _json_uri(
+                    snapshot.project.project_id,
+                    "index",
+                    "index.json",
+                ),
+                "evidence_project_index",
+                _PROJECT_INDEX_SCHEMA,
+                snapshot.expected_index.to_dict(),
+            )
+            if index_ref != expected_ref:
+                raise ValueError("project index override is invalid")
         index_refs[snapshot.project.project_id] = index_ref
         entries.append(
             EvidenceRegistryEntry.from_dict(
@@ -1049,9 +1039,7 @@ def _derive_registry_once(
             )
         )
     return (
-        EvidenceRegistry.create(
-            tuple(sorted(entries, key=lambda item: item.project_id))
-        ),
+        EvidenceRegistry.create(tuple(sorted(entries, key=lambda item: item.project_id))),
         snapshots,
         index_refs,
     )
@@ -1077,13 +1065,14 @@ def _reauthenticate_registry_state(
         tuple[_ProjectSnapshot, ...],
         Mapping[str, ArtifactRef],
     ],
+    index_overrides: Mapping[str, ArtifactRef] | None = None,
 ) -> tuple[
     EvidenceRegistry,
     tuple[_ProjectSnapshot, ...],
     Mapping[str, ArtifactRef],
 ]:
     try:
-        current = _derive_registry_once(root)
+        current = _derive_registry_once(root, index_overrides)
     except (OSError, TypeError, ValueError) as exc:
         raise ValueError("evidence source snapshot changed") from exc
     if current != expected:
@@ -1141,6 +1130,133 @@ def rebuild_registry(root: EvidenceRoot | str | Path) -> ArtifactRef:
     return reference
 
 
+def _rollback_created_json(
+    root: EvidenceRoot,
+    reference: ArtifactRef,
+) -> None:
+    target = root.resolve(reference.uri, must_exist=True)
+    data = _secure_read(target, root, "evidence derived rollback target")
+    if len(data) != reference.size_bytes or hashlib.sha256(data).hexdigest() != reference.sha256:
+        raise ValueError("evidence derived rollback target changed")
+    try:
+        os.unlink(target)
+    except OSError as exc:
+        raise ValueError("evidence derived rollback failed") from exc
+    if target.exists() or target.is_symlink():
+        raise ValueError("evidence derived rollback failed")
+
+
+def rebuild_evidence_indexes(
+    root: EvidenceRoot | str | Path,
+    project_id: str,
+) -> tuple[ArtifactRef, ArtifactRef]:
+    try:
+        _require_project_id(project_id)
+    except ValueError as exc:
+        raise ValueError("evidence rebuild request is invalid") from exc
+    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
+    with evidence_root_mutation_lock(root_path):
+        authenticated_root = _as_root(root_path)
+        index_uri = _json_uri(project_id, "index", "index.json")
+        index_path = authenticated_root.resolve(index_uri)
+        registry_uri = "tracelane://evidence/registry.json"
+        registry_path = authenticated_root.resolve(registry_uri)
+        index_exists = index_path.exists()
+        registry_exists = registry_path.exists()
+        if index_exists != registry_exists:
+            raise ValueError("evidence derived state conflicts")
+        if index_exists:
+            snapshots, index_refs, registry_ref = _verified_state(authenticated_root)
+            if not any(snapshot.project.project_id == project_id for snapshot in snapshots):
+                raise ValueError("evidence rebuild request is invalid")
+            return index_refs[project_id], registry_ref
+
+        initial_project = _load_project_snapshot(
+            authenticated_root,
+            project_id,
+        )
+        final_project = _reauthenticate_project_snapshot(
+            authenticated_root,
+            initial_project,
+        )
+        index_ref = _json_reference(
+            index_uri,
+            "evidence_project_index",
+            _PROJECT_INDEX_SCHEMA,
+            final_project.expected_index.to_dict(),
+        )
+        overrides = {project_id: index_ref}
+        initial_registry = _derive_registry_once(
+            authenticated_root,
+            overrides,
+        )
+        final_registry = _reauthenticate_registry_state(
+            authenticated_root,
+            initial_registry,
+            overrides,
+        )
+        registry_ref = _json_reference(
+            registry_uri,
+            "evidence_registry",
+            _REGISTRY_SCHEMA,
+            final_registry[0].to_dict(),
+        )
+        if index_path.exists() or registry_path.exists():
+            raise ValueError("evidence derived state changed")
+        _reauthenticate_project_snapshot(
+            authenticated_root,
+            initial_project,
+        )
+        _reauthenticate_registry_state(
+            authenticated_root,
+            initial_registry,
+            overrides,
+        )
+
+        created: list[ArtifactRef] = []
+        try:
+            published_index = write_json_create_or_match(
+                authenticated_root,
+                index_uri,
+                "evidence_project_index",
+                _PROJECT_INDEX_SCHEMA,
+                final_project.expected_index.to_dict(),
+            )
+            if published_index != index_ref:
+                raise ValueError("project index publication changed")
+            created.append(published_index)
+            published_registry = write_json_create_or_match(
+                authenticated_root,
+                registry_uri,
+                "evidence_registry",
+                _REGISTRY_SCHEMA,
+                final_registry[0].to_dict(),
+            )
+            if published_registry != registry_ref:
+                raise ValueError("evidence registry publication changed")
+            created.append(published_registry)
+            verified = verify_evidence_registry(
+                authenticated_root,
+                project_id,
+            )
+            if (
+                verified.project_index_sha256 != index_ref.sha256
+                or verified.registry_sha256 != registry_ref.sha256
+            ):
+                raise ValueError("evidence derived verification changed")
+            return index_ref, registry_ref
+        except (OSError, TypeError, ValueError):
+            rollback_failed = False
+            for reference in reversed(created):
+                try:
+                    _rollback_created_json(authenticated_root, reference)
+                except (OSError, TypeError, ValueError):
+                    rollback_failed = True
+            if rollback_failed:
+                raise ValueError("evidence derived rollback failed") from None
+            raise ValueError("evidence derived publication failed") from None
+
+
 def _read_registry(
     root: EvidenceRoot,
     expected: EvidenceRegistry,
@@ -1192,16 +1308,12 @@ def verify_evidence_registry(
     selected = snapshots
     project_index_sha256 = None
     if project_id is not None:
-        selected = tuple(
-            item for item in snapshots if item.project.project_id == project_id
-        )
+        selected = tuple(item for item in snapshots if item.project.project_id == project_id)
         if not selected:
             raise ValueError("project verification request is invalid")
         project_index_sha256 = index_refs[project_id].sha256
     status_counts = {
-        status: sum(
-            snapshot.expected_index.status_counts[status] for snapshot in selected
-        )
+        status: sum(snapshot.expected_index.status_counts[status] for snapshot in selected)
         for status in _STATUSES
     }
     return VerificationReport(
@@ -1280,9 +1392,7 @@ def find_evidence(
     lower, upper = _validated_query(query)
     authenticated_root = _as_root(root)
     snapshots, _, _ = _verified_state(authenticated_root)
-    selected = tuple(
-        item for item in snapshots if item.project.project_id == query.project_id
-    )
+    selected = tuple(item for item in snapshots if item.project.project_id == query.project_id)
     if not selected:
         raise ValueError("evidence query is invalid")
     index = selected[0].expected_index

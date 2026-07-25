@@ -4,6 +4,8 @@ import dataclasses
 import importlib
 import json
 import shutil
+import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,9 +18,12 @@ from tracelane.evidence_registry import (
     EvidenceImportMetadata,
     EvidenceImportRow,
     EvidenceProject,
+    EvidenceQuery,
+    find_evidence,
     import_acquisition_project,
     verify_evidence_registry,
 )
+from tracelane.evidence_registry import index as evidence_index
 
 EXPECTED_IMPORT_ROWS = {
     "1807-07-09": {
@@ -263,6 +268,21 @@ def test_evidence_list_has_stable_text_and_json_output(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     before = _tree_state(registry_root)
+    entries = find_evidence(
+        registry_root,
+        EvidenceQuery("hist-001", statuses=("pending",)),
+    )
+    values = [entry.to_dict() for entry in entries]
+    expected_text = "".join(
+        f"candidate_id={value['candidate_id']} "
+        f"status={value['effective_status']} "
+        f"role={value['role']} "
+        f"date={value['document_date']} "
+        f"source_type={value['source_type']} "
+        f"domains={','.join(value['domains'])} "
+        f"facts={','.join(value['fact_ids'])}\n"
+        for value in values
+    )
     arguments = [
         "evidence",
         "list",
@@ -276,16 +296,12 @@ def test_evidence_list_has_stable_text_and_json_output(
 
     assert main(arguments) == 0
     text_output = capsys.readouterr().out
-    assert text_output.count("candidate_id=") == 9
-    assert "status=pending" in text_output
-    assert "role=future-control" in text_output
+    assert text_output == expected_text
 
     assert main([*arguments, "--json"]) == 0
     json_output = capsys.readouterr().out
-    values = json.loads(json_output)
-    assert len(values) == 9
+    assert json_output == canonical_json(values) + "\n"
     assert values == sorted(values, key=lambda item: item["candidate_id"])
-    assert all(item["effective_status"] == "pending" for item in values)
     assert _tree_state(registry_root) == before
 
 
@@ -304,12 +320,16 @@ def test_evidence_find_filters_fact_date_and_clean_view(
         "--json",
     ]
     assert main([*common, "--fact", "logistics.prewar_supply_plan"]) == 0
-    fact_values = json.loads(capsys.readouterr().out)
+    fact_output = capsys.readouterr().out
+    fact_values = json.loads(fact_output)
+    assert fact_output == canonical_json(fact_values) + "\n"
     assert len(fact_values) == 1
     assert fact_values[0]["document_date"] == "1812-03-26"
 
     assert main([*common, "--date-from", "1812", "--date-to", "1812", "--clean"]) == 0
-    clean_values = json.loads(capsys.readouterr().out)
+    clean_output = capsys.readouterr().out
+    clean_values = json.loads(clean_output)
+    assert clean_output == canonical_json(clean_values) + "\n"
     assert [item["document_date"] for item in clean_values] == ["1812-03-26"]
     assert all(item["role"] != "future-control" for item in clean_values)
     assert _tree_state(registry_root) == before
@@ -319,6 +339,23 @@ def test_evidence_verify_has_stable_text_and_json_output(
     registry_root: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    before = _tree_state(registry_root)
+    report = verify_evidence_registry(registry_root, "hist-001")
+    expected_value = {
+        "candidate_count": report.candidate_count,
+        "future_control_count": report.future_control_count,
+        "project_count": report.project_count,
+        "project_index_sha256": report.project_index_sha256,
+        "registry_sha256": report.registry_sha256,
+        "review_count": report.review_count,
+        "status_counts": dict(report.status_counts),
+    }
+    expected_text = (
+        "projects=1 candidates=9 reviews=0 future_controls=1 "
+        "pending=9 approved=0 rejected=0 superseded=0 "
+        f"registry_sha256={report.registry_sha256} "
+        f"project_index_sha256={report.project_index_sha256}\n"
+    )
     arguments = [
         "evidence",
         "verify",
@@ -329,19 +366,12 @@ def test_evidence_verify_has_stable_text_and_json_output(
     ]
     assert main(arguments) == 0
     output = capsys.readouterr().out
-    assert output.startswith("projects=1 candidates=9 reviews=0 future_controls=1 ")
-    assert "pending=9 approved=0 rejected=0 superseded=0" in output
+    assert output == expected_text
 
     assert main([*arguments, "--json"]) == 0
-    value = json.loads(capsys.readouterr().out)
-    assert value["project_count"] == 1
-    assert value["candidate_count"] == 9
-    assert value["status_counts"] == {
-        "approved": 0,
-        "pending": 9,
-        "rejected": 0,
-        "superseded": 0,
-    }
+    json_output = capsys.readouterr().out
+    assert json_output == canonical_json(expected_value) + "\n"
+    assert _tree_state(registry_root) == before
 
 
 def test_evidence_rebuild_creates_only_missing_derived_files(
@@ -368,15 +398,166 @@ def test_evidence_rebuild_creates_only_missing_derived_files(
         "--json",
     ]
     assert main(arguments) == 0
-    value = json.loads(capsys.readouterr().out)
+    json_output = capsys.readouterr().out
+    value = json.loads(json_output)
+    assert json_output == canonical_json(value) + "\n"
     assert value["project_id"] == "hist-001"
     assert index_path.read_bytes() == expected_index
     assert registry_path.read_bytes() == expected_registry
 
     before = _tree_state(target)
-    assert main(arguments) == 0
-    assert json.loads(capsys.readouterr().out) == value
+    text_arguments = [item for item in arguments if item != "--json"]
+    assert main(text_arguments) == 0
+    assert capsys.readouterr().out == (
+        "project=hist-001 "
+        f"project_index_sha256={value['project_index_sha256']} "
+        f"registry_sha256={value['registry_sha256']}\n"
+    )
     assert _tree_state(target) == before
+
+
+def test_evidence_rebuild_rejects_index_without_registry(
+    registry_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target = tmp_path / "reverse-asymmetry"
+    shutil.copytree(registry_root, target)
+    (target / "registry.json").unlink()
+    before = _tree_state(target)
+
+    assert (
+        main(
+            [
+                "evidence",
+                "rebuild-index",
+                "--root",
+                str(target),
+                "--project",
+                "hist-001",
+            ]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert captured.err == "tracelane: error: evidence rebuild-index failed\n"
+    assert _tree_state(target) == before
+
+
+def test_evidence_rebuild_rolls_back_index_after_late_registry_failure(
+    registry_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "late-failure"
+    shutil.copytree(registry_root, target)
+    (target / "projects" / "hist-001" / "index.json").unlink()
+    (target / "registry.json").unlink()
+    before = _tree_state(target)
+    original_write = evidence_index.write_json_create_or_match
+
+    def fail_registry(*args, **kwargs):
+        if args[1] == "tracelane://evidence/registry.json":
+            raise ValueError("injected registry publication failure")
+        return original_write(*args, **kwargs)
+
+    monkeypatch.setattr(
+        evidence_index,
+        "write_json_create_or_match",
+        fail_registry,
+    )
+
+    assert (
+        main(
+            [
+                "evidence",
+                "rebuild-index",
+                "--root",
+                str(target),
+                "--project",
+                "hist-001",
+            ]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert captured.err == "tracelane: error: evidence rebuild-index failed\n"
+    assert _tree_state(target) == before
+
+
+def test_evidence_rebuild_preflights_other_project_before_writing(
+    registry_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target = tmp_path / "broken-other-project"
+    shutil.copytree(registry_root, target)
+    (target / "projects" / "hist-001" / "index.json").unlink()
+    (target / "registry.json").unlink()
+    (target / "projects" / "broken-project").mkdir()
+    before = _tree_state(target)
+
+    assert (
+        main(
+            [
+                "evidence",
+                "rebuild-index",
+                "--root",
+                str(target),
+                "--project",
+                "hist-001",
+            ]
+        )
+        == 1
+    )
+    assert capsys.readouterr().err == "tracelane: error: evidence rebuild-index failed\n"
+    assert _tree_state(target) == before
+
+
+def test_evidence_rebuild_does_not_delete_replaced_file_during_rollback(
+    registry_root: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "rollback-replacement"
+    shutil.copytree(registry_root, target)
+    index_path = target / "projects" / "hist-001" / "index.json"
+    registry_path = target / "registry.json"
+    index_path.unlink()
+    registry_path.unlink()
+    replacement = b"external replacement\n"
+    original_write = evidence_index.write_json_create_or_match
+
+    def replace_before_failure(*args, **kwargs):
+        if args[1] == "tracelane://evidence/registry.json":
+            index_path.write_bytes(replacement)
+            raise ValueError("injected registry publication failure")
+        return original_write(*args, **kwargs)
+
+    monkeypatch.setattr(
+        evidence_index,
+        "write_json_create_or_match",
+        replace_before_failure,
+    )
+
+    assert (
+        main(
+            [
+                "evidence",
+                "rebuild-index",
+                "--root",
+                str(target),
+                "--project",
+                "hist-001",
+            ]
+        )
+        == 1
+    )
+    assert capsys.readouterr().err == "tracelane: error: evidence rebuild-index failed\n"
+    assert index_path.read_bytes() == replacement
+    assert not registry_path.exists()
 
 
 @pytest.mark.parametrize("corrupt_name", ["index", "source"])
@@ -529,6 +710,22 @@ def test_import_script_imports_and_verifies_locked_hist001_project(
     assert report.future_control_count == 1
 
 
+def test_import_script_direct_entrypoint_loads_installed_locked_manifest() -> None:
+    script = Path(__file__).resolve().parents[2] / "scripts" / "import_hist001_evidence.py"
+    completed = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=script.parent.parent,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stderr == ""
+    assert completed.stdout.startswith("usage: import_hist001_evidence.py ")
+    assert "Traceback" not in completed.stdout
+
+
 def test_import_script_rejects_invalid_metadata_without_echo_or_target_write(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -619,3 +816,66 @@ def test_import_script_rejects_substituted_license_basis(
     assert "Traceback" not in captured.err
     assert str(source.resolve()) not in captured.err
     assert not target.exists()
+
+
+def test_import_script_rejects_coherent_future_control_substitution(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_import = importlib.import_module("scripts.import_hist001_evidence")
+    substituted = dataclasses.replace(
+        preparation.SPECS[-1],
+        title="Fabricated post-cutoff bulletin",
+        source_url="https://history.example/fabricated-bulletin",
+        document_date="1812-11-30",
+        note=(
+            "A repository-authored fabricated future-control note whose "
+            "candidate, content, manifest, and metadata digests are coherent."
+        ),
+    )
+    monkeypatch.setattr(
+        preparation,
+        "SPECS",
+        (*preparation.SPECS[:-1], substituted),
+    )
+    source = tmp_path / "coherent-substitution"
+    source.mkdir()
+    preparation.prepare(source)
+    target = tmp_path / "evidence"
+
+    assert evidence_import.main(["--source", str(source), "--target", str(target)]) == 1
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert str(source.resolve()) not in captured.err
+    assert not target.exists()
+
+
+def test_import_script_has_no_post_commit_reverification_window(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_import = importlib.import_module("scripts.import_hist001_evidence")
+    source = tmp_path / "source"
+    source.mkdir()
+    preparation.prepare(source)
+    target = tmp_path / "evidence"
+    verification_calls = 0
+
+    def fail_reverification(*args, **kwargs):
+        nonlocal verification_calls
+        verification_calls += 1
+        raise ValueError("injected post-commit verification failure")
+
+    monkeypatch.setattr(
+        evidence_import,
+        "verify_evidence_registry",
+        fail_reverification,
+        raising=False,
+    )
+
+    assert evidence_import.main(["--source", str(source), "--target", str(target)]) == 0
+    assert verification_calls == 0
+    assert "project=hist-001" in capsys.readouterr().out
+    assert verify_evidence_registry(target, "hist-001").candidate_count == 9

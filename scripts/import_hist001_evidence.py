@@ -1,143 +1,33 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
-from collections import Counter
 from collections.abc import Sequence
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 
+from tracelane.acquisition import EvidenceCandidate, ManualAcquisitionService
+from tracelane.acquisition.contracts import compute_candidate_id
+from tracelane.contracts import canonical_json
 from tracelane.evidence_registry import (
     EvidenceImportMetadata,
+    EvidenceImportRow,
     EvidenceProject,
     import_acquisition_project,
-    verify_evidence_registry,
 )
+from tracelane.hist001 import (
+    HIST001_CURATOR,
+    HIST001_RETRIEVED_AT,
+    HIST001_SESSION_ID,
+    HIST001_SOURCE_MANIFEST,
+)
+from tracelane.v2.contracts import ArtifactRef, content_digest
 from tracelane.v2.storage import secure_read_bytes
 
-_SESSION_ID = "acq_hist001_20260724"
-_REQUIRED_DOMAINS = frozenset(
-    {
-        "diplomacy",
-        "economy",
-        "iberia",
-        "imperial-governance",
-        "logistics",
-        "military",
-    }
-)
-_SOURCE_COUNTS = Counter(
-    {
-        "hist001_tilsit_treaty": 1,
-        "hist001_continental_system_decrees": 2,
-        "hist001_russian_trade_1811": 1,
-        "hist001_napoleon_supply_correspondence": 1,
-        "hist001_wellington_iberia_dispatch": 1,
-        "hist001_french_conscription_1811": 2,
-        "hist001_twenty_ninth_bulletin": 1,
-    }
-)
-_SOURCE_SCOPES = {
-    "hist001_tilsit_treaty": (
-        frozenset({"diplomacy", "economy"}),
-        frozenset(
-            {
-                "diplomacy.duchy_of_warsaw",
-                "diplomacy.tilsit_settlement",
-                "economy.british_trade_exclusion",
-            }
-        ),
-        "evidence",
-    ),
-    "hist001_continental_system_decrees": (
-        frozenset({"economy", "imperial-governance"}),
-        frozenset(
-            {
-                "economy.continental_system_scope",
-                "economy.neutral_shipping_exposure",
-                "imperial_governance.allied_enforcement",
-            }
-        ),
-        "evidence",
-    ),
-    "hist001_russian_trade_1811": (
-        frozenset({"diplomacy", "economy"}),
-        frozenset(
-            {
-                "diplomacy.franco_russian_trade_friction",
-                "economy.russian_trade_rules_1811",
-            }
-        ),
-        "evidence",
-    ),
-    "hist001_napoleon_supply_correspondence": (
-        frozenset({"logistics", "military"}),
-        frozenset(
-            {
-                "logistics.prewar_supply_plan",
-                "military.niemen_consumption_boundary",
-            }
-        ),
-        "evidence",
-    ),
-    "hist001_wellington_iberia_dispatch": (
-        frozenset({"iberia"}),
-        frozenset(
-            {
-                "iberia.allied_force_commitment",
-                "iberia.portuguese_finance_and_supply",
-            }
-        ),
-        "evidence",
-    ),
-    "hist001_french_conscription_1811": (
-        frozenset({"imperial-governance", "military"}),
-        frozenset(
-            {
-                "imperial_governance.reserve_and_department_allocation",
-                "military.conscription_scale_1811",
-            }
-        ),
-        "evidence",
-    ),
-    "hist001_twenty_ninth_bulletin": (
-        frozenset({"military"}),
-        frozenset({"military.post_campaign_outcome"}),
-        "future-control",
-    ),
-}
-_SOURCE_LICENSES = {
-    "hist001_tilsit_treaty": (
-        "Repository-authored paraphrase of a public-domain treaty and "
-        "public-domain contemporary translation."
-    ),
-    "hist001_continental_system_decrees": (
-        "Repository-authored paraphrase of public-domain decrees; the "
-        "source identifies the historical editions and translations."
-    ),
-    "hist001_russian_trade_1811": (
-        "Repository-authored paraphrase using the Presidential Library "
-        "catalogue record for an 1810 State Council file; no archive image "
-        "or modern anthology text is redistributed."
-    ),
-    "hist001_napoleon_supply_correspondence": (
-        "Repository-authored paraphrase of public-domain Napoleonic "
-        "correspondence; the modern page is used only as an archive locator "
-        "and letter-number reference."
-    ),
-    "hist001_wellington_iberia_dispatch": (
-        "Repository-authored paraphrase of a public-domain dispatch; no "
-        "substantial verbatim text is redistributed."
-    ),
-    "hist001_french_conscription_1811": (
-        "Repository-authored paraphrase of a public-domain proposed decree and tables."
-    ),
-    "hist001_twenty_ninth_bulletin": (
-        "Repository-authored paraphrase of a public-domain military "
-        "bulletin; retained only as a future-information leakage control."
-    ),
-}
+_REQUIRED_DOMAINS = frozenset(domain for spec in HIST001_SOURCE_MANIFEST for domain in spec.domains)
 
 
 def hist001_project() -> EvidenceProject:
@@ -157,7 +47,7 @@ def hist001_project() -> EvidenceProject:
 
 
 def _read_metadata(source: Path) -> EvidenceImportMetadata:
-    metadata_path = source / "acquisition" / _SESSION_ID / "candidate-metadata.json"
+    metadata_path = source / "acquisition" / HIST001_SESSION_ID / "candidate-metadata.json"
     try:
         value = json.loads(
             secure_read_bytes(
@@ -169,33 +59,149 @@ def _read_metadata(source: Path) -> EvidenceImportMetadata:
         if not isinstance(value, dict):
             raise ValueError
         metadata = EvidenceImportMetadata.from_dict(value)
-        source_counts = Counter(row.source_spec_id for row in metadata.candidates)
-        covered_domains = {domain for row in metadata.candidates for domain in row.domains}
         if (
             metadata.project_id != "hist-001"
-            or metadata.session_id != _SESSION_ID
+            or metadata.session_id != HIST001_SESSION_ID
             or len(metadata.candidates) != 9
-            or source_counts != _SOURCE_COUNTS
-            or covered_domains != _REQUIRED_DOMAINS
-            or sum(row.role == "future-control" for row in metadata.candidates) != 1
-            or any(
-                row.source_type != "primary"
-                or row.content_authorship != "repository_authored"
-                or row.retention_policy != "paraphrase_only"
-                or row.license_basis != _SOURCE_LICENSES[row.source_spec_id]
-                or (
-                    frozenset(row.domains),
-                    frozenset(row.fact_ids),
-                    row.role,
-                )
-                != _SOURCE_SCOPES[row.source_spec_id]
-                for row in metadata.candidates
-            )
         ):
             raise ValueError
         return metadata
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("HIST-001 import metadata is invalid") from exc
+
+
+def _expected_locked_candidates() -> tuple[
+    tuple[EvidenceCandidate, EvidenceImportRow, ArtifactRef, bytes, bytes],
+    ...,
+]:
+    expected: list[tuple[EvidenceCandidate, EvidenceImportRow, ArtifactRef, bytes, bytes]] = []
+    for spec in HIST001_SOURCE_MANIFEST:
+        for document_date in spec.document_date.split("/"):
+            date_precision = {
+                4: "year",
+                7: "month",
+                10: "day",
+            }[len(document_date)]
+            content_bytes = spec.note.encode("utf-8")
+            content_sha256 = hashlib.sha256(content_bytes).hexdigest()
+            content_ref = ArtifactRef.from_dict(
+                {
+                    "kind": "evidence_blob",
+                    "uri": (
+                        "tracelane://artifacts/blobs/sha256/"
+                        f"{content_sha256[:2]}/{content_sha256}.blob"
+                    ),
+                    "media_type": "text/plain",
+                    "sha256": content_sha256,
+                    "size_bytes": len(content_bytes),
+                }
+            )
+            candidate_id = compute_candidate_id(
+                query=spec.query,
+                title=spec.title,
+                source_url=spec.source_url,
+                document_date=document_date,
+                date_precision=date_precision,
+                content_sha256=content_sha256,
+            )
+            candidate = EvidenceCandidate.create(
+                candidate_id=candidate_id,
+                query=spec.query,
+                title=spec.title,
+                source_url=spec.source_url,
+                document_date=document_date,
+                date_precision=date_precision,  # type: ignore[arg-type]
+                retrieved_at=HIST001_RETRIEVED_AT,
+                curator=HIST001_CURATOR,
+                transformation_refs=(),
+                content_ref=content_ref,
+            )
+            candidate_bytes = canonical_json(candidate.to_dict()).encode("utf-8") + b"\n"
+            candidate_ref = ArtifactRef.from_dict(
+                {
+                    "kind": "evidence_candidate",
+                    "uri": (
+                        "tracelane://artifacts/acquisition/"
+                        f"{HIST001_SESSION_ID}/candidates/{candidate_id}.json"
+                    ),
+                    "media_type": "application/json",
+                    "schema_id": "tracelane://schemas/evidence-candidate/v2",
+                    "sha256": hashlib.sha256(candidate_bytes).hexdigest(),
+                    "size_bytes": len(candidate_bytes),
+                }
+            )
+            row = EvidenceImportRow.from_dict(
+                {
+                    "source_spec_id": spec.source_spec_id,
+                    "candidate_id": candidate.candidate_id,
+                    "candidate_record_sha256": candidate.record_sha256,
+                    "candidate_content_sha256": candidate.content_sha256,
+                    "source_type": spec.source_type,
+                    "license_basis": spec.license_basis,
+                    "content_authorship": "repository_authored",
+                    "retention_policy": "paraphrase_only",
+                    "domains": sorted(spec.domains),
+                    "fact_ids": sorted(spec.fact_ids),
+                    "role": spec.role,
+                }
+            )
+            expected.append(
+                (
+                    candidate,
+                    row,
+                    candidate_ref,
+                    candidate_bytes,
+                    content_bytes,
+                )
+            )
+    return tuple(sorted(expected, key=lambda item: item[0].candidate_id))
+
+
+def _authenticate_locked_package(
+    source: Path,
+    metadata: EvidenceImportMetadata,
+) -> None:
+    try:
+        service = ManualAcquisitionService(
+            source,
+            session_id=HIST001_SESSION_ID,
+        )
+        closures = service.snapshot_candidates()
+        expected = _expected_locked_candidates()
+        if len(closures) != len(expected):
+            raise ValueError
+        manifest_value: dict[str, object] = {
+            "schema_id": "tracelane://schemas/acquisition-session/v2",
+            "schema_version": "2.0.0",
+            "content_sha256": "",
+            "session_id": HIST001_SESSION_ID,
+            "mode": "codex_manual",
+            "created_at": HIST001_RETRIEVED_AT,
+            "network_access_available_to_agent": False,
+            "candidate_refs": [item[2].to_dict() for item in expected],
+            "review_refs": [],
+            "promoted_record_refs": [],
+        }
+        if metadata.manifest_sha256 != content_digest(manifest_value):
+            raise ValueError
+        closure_by_id = {closure.candidate.candidate_id: closure for closure in closures}
+        expected_rows: list[EvidenceImportRow] = []
+        for candidate, row, candidate_ref, candidate_bytes, content_bytes in expected:
+            closure = closure_by_id.get(candidate.candidate_id)
+            if (
+                closure is None
+                or closure.candidate != candidate
+                or closure.candidate_ref != candidate_ref
+                or closure.candidate_bytes != candidate_bytes
+                or closure.content_bytes != content_bytes
+                or closure.transformations
+            ):
+                raise ValueError
+            expected_rows.append(row)
+        if metadata.candidates != tuple(expected_rows):
+            raise ValueError
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        raise ValueError("HIST-001 candidate package is invalid") from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -214,34 +220,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         return int(exc.code)
     try:
         metadata = _read_metadata(arguments.source)
+        _authenticate_locked_package(arguments.source, metadata)
         report = import_acquisition_project(
             arguments.source,
             arguments.target,
             hist001_project(),
             metadata,
         )
-        project_report = verify_evidence_registry(
-            arguments.target,
-            "hist-001",
-        )
-        registry_report = verify_evidence_registry(arguments.target)
-        if (
-            report.candidate_count != project_report.candidate_count
-            or report.pending_count != project_report.status_counts["pending"]
-            or report.future_control_count != project_report.future_control_count
-            or report.project_index_sha256 != project_report.project_index_sha256
-            or report.registry_sha256 != project_report.registry_sha256
-            or report.registry_sha256 != registry_report.registry_sha256
-        ):
-            raise ValueError("HIST-001 persisted verification failed")
-        print(
-            f"project={report.project_id} "
-            f"candidates={report.candidate_count} "
-            f"pending={report.pending_count} "
-            f"source_manifest_sha256={report.source_manifest_sha256} "
-            f"project_index_sha256={report.project_index_sha256} "
-            f"registry_sha256={report.registry_sha256}"
-        )
+        with suppress(OSError):
+            print(
+                f"project={report.project_id} "
+                f"candidates={report.candidate_count} "
+                f"pending={report.pending_count} "
+                f"source_manifest_sha256={report.source_manifest_sha256} "
+                f"project_index_sha256={report.project_index_sha256} "
+                f"registry_sha256={report.registry_sha256}"
+            )
         return 0
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
         print(
