@@ -561,6 +561,14 @@ move; it has no reviewed POSIX or macOS primitive with equivalent source
 ownership that avoids pathname re-resolution. Registry read, verification,
 query, and rebuild behavior remains portable.
 
+The v1 consistency model covers TraceLane readers and writers that use the
+shared physical-root lock, plus ordinary caller, input, and filesystem
+failures. Deliberate same-account mutation or relocation of TraceLane-owned
+namespace objects by a process that ignores the lock is outside this model.
+Defensive checks remain fail-closed when interference is detected, but v1 does
+not claim complete namespace custody against that actor. Retained quarantine
+requires explicit, ownership-confirmed offline maintenance.
+
 ### 10.7 Freeze gate
 
 Before explicit human approval:

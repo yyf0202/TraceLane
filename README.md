@@ -233,6 +233,14 @@ move; the current design has no reviewed POSIX or macOS primitive providing
 the same ownership guarantee without resolving the source pathname again.
 Registry read, verification, query, and rebuild operations remain portable.
 
+The v1 consistency guarantee assumes TraceLane readers and writers cooperate
+through the shared physical-root lock. A same-account process that ignores the
+lock and deliberately relocates or replaces TraceLane-owned namespace objects
+during an operation is outside the v1 threat model. Existing defensive checks
+remain fail-closed where they detect interference, but v1 does not claim
+complete namespace custody against that actor. Retained quarantine requires
+explicit, ownership-confirmed offline maintenance.
+
 Those hashes prove internal snapshot consistency; they do not establish who
 created the v1 source or whether its claims are true. Operators must select a
 trusted local source. For published experiments, the repository commit and

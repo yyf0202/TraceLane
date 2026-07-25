@@ -845,8 +845,16 @@ def test_import_script_direct_entrypoint_loads_installed_locked_manifest() -> No
 def test_import_script_rejects_invalid_metadata_without_echo_or_target_write(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     evidence_import = importlib.import_module("scripts.import_hist001_evidence")
+    monkeypatch.setattr(
+        evidence_import,
+        "import_acquisition_project",
+        lambda *args, **kwargs: pytest.fail(
+            f"import reached for invalid metadata: {args!r} {kwargs!r}"
+        ),
+    )
     source = tmp_path / "sensitive-source"
     source.mkdir()
     result = preparation.prepare(source)
@@ -869,8 +877,16 @@ def test_import_script_rejects_invalid_metadata_without_echo_or_target_write(
 def test_import_script_rejects_semantically_substituted_valid_metadata(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     evidence_import = importlib.import_module("scripts.import_hist001_evidence")
+    monkeypatch.setattr(
+        evidence_import,
+        "import_acquisition_project",
+        lambda *args, **kwargs: pytest.fail(
+            f"import reached for substituted metadata: {args!r} {kwargs!r}"
+        ),
+    )
     source = tmp_path / "substituted-source"
     source.mkdir()
     result = preparation.prepare(source)
@@ -903,8 +919,16 @@ def test_import_script_rejects_semantically_substituted_valid_metadata(
 def test_import_script_rejects_substituted_license_basis(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     evidence_import = importlib.import_module("scripts.import_hist001_evidence")
+    monkeypatch.setattr(
+        evidence_import,
+        "import_acquisition_project",
+        lambda *args, **kwargs: pytest.fail(
+            f"import reached for substituted license: {args!r} {kwargs!r}"
+        ),
+    )
     source = tmp_path / "license-source"
     source.mkdir()
     result = preparation.prepare(source)
@@ -940,6 +964,13 @@ def test_import_script_rejects_coherent_future_control_substitution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     evidence_import = importlib.import_module("scripts.import_hist001_evidence")
+    monkeypatch.setattr(
+        evidence_import,
+        "import_acquisition_project",
+        lambda *args, **kwargs: pytest.fail(
+            f"import reached for substituted future control: {args!r} {kwargs!r}"
+        ),
+    )
     substituted = dataclasses.replace(
         preparation.SPECS[-1],
         title="Fabricated post-cutoff bulletin",

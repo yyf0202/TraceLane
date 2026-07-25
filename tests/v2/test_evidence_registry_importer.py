@@ -355,6 +355,44 @@ def test_import_rejects_overlapping_source_and_target_before_filesystem_mutation
     assert not (observed_root / ".tracelane-staging").exists()
 
 
+@pytest.mark.parametrize(
+    ("reserved_name", "target_form"),
+    [
+        (".tracelane-staging", "equal"),
+        (".tracelane-locks", "equal"),
+        (".tracelane-staging", "inside"),
+        (".tracelane-locks", "inside"),
+    ],
+)
+def test_import_rejects_reserved_control_target_before_filesystem_mutation(
+    tmp_path: Path,
+    reserved_name: str,
+    target_form: str,
+) -> None:
+    source, _, project, metadata = _import_case(tmp_path / "source-case", count=1)
+    target_parent = tmp_path / "target-parent"
+    target_parent.mkdir()
+    reserved_root = target_parent / reserved_name
+    target = reserved_root if target_form == "equal" else reserved_root / "evidence"
+    before = _tree_snapshot(tmp_path)
+
+    with pytest.raises(
+        ValueError,
+        match="^evidence import target is invalid$",
+    ):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert _tree_snapshot(tmp_path) == before
+
+
+def test_filesystem_root_target_contains_derived_control_roots(
+    tmp_path: Path,
+) -> None:
+    filesystem_root = Path(tmp_path.anchor)
+
+    assert evidence_importer._target_overlaps_control_roots(filesystem_root)
+
+
 def test_import_rejects_corrupt_existing_registry_without_overwrite(
     tmp_path: Path,
 ) -> None:

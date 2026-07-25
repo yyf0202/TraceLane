@@ -55,6 +55,7 @@ from tracelane.v2.storage import ArtifactRoot, secure_read_bytes
 _PROJECT_SCHEMA = "tracelane://schemas/evidence-project/v1"
 _CANDIDATE_SCHEMA = "tracelane://schemas/project-evidence-candidate/v1"
 _REGISTRY_SCHEMA = "tracelane://schemas/evidence-registry/v1"
+_CONTROL_ROOT_NAMES = (".tracelane-staging", ".tracelane-locks")
 _IMPORT_PLATFORM = os.name
 _PUBLIC_IMPORT_ERRORS = frozenset(
     {
@@ -149,6 +150,14 @@ def _paths_overlap(first: Path, second: Path) -> bool:
     except ValueError:
         return False
     return shared in {first_key, second_key}
+
+
+def _target_overlaps_control_roots(target: Path) -> bool:
+    for ancestor in (target.parent, *target.parent.parents):
+        for name in _CONTROL_ROOT_NAMES:
+            if _paths_overlap(target, ancestor / name):
+                return True
+    return False
 
 
 def _source_manifest_sha256(
@@ -1109,6 +1118,8 @@ def _import_acquisition_project(
     target_path = _canonical_absolute_path(target_root)
     if _paths_overlap(source_path, target_path):
         raise ValueError("acquisition import source and target overlap")
+    if _target_overlaps_control_roots(target_path):
+        raise ValueError("evidence import target is invalid")
     service, authenticated = _authenticate_source(source_path, metadata)
     committed_report: EvidenceImportReport | None = None
     retirement_receipt: _RetirementDirectoryReceipt | None = None

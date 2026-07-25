@@ -72,12 +72,12 @@ and staging directories are never recursively deleted by the online workflow.
 They are atomically retired under the target's sibling
 `.tracelane-staging/retired/` namespace with randomized names. That namespace is
 opened once and retained by physical directory handle for the transaction;
-retirement uses a handle-relative, no-replace move so replacing its pathname or
-an ancestor cannot redirect residue into the live Evidence Registry. The
-namespace is outside evidence discovery and verification, so retained residue
-is not part of the Evidence Registry. Removing retired residue is an explicit
-offline maintenance action after an operator has independently confirmed
-ownership; the import API does not clean it automatically.
+retirement uses a handle-relative, no-replace move so cooperative TraceLane
+operations cannot retarget it to a different directory. The namespace is
+outside evidence discovery and verification, so retained residue is not part of
+the Evidence Registry. Removing retired residue is an explicit offline
+maintenance action after an operator has independently confirmed ownership; the
+import API does not clean it automatically.
 
 After a review append, `rebuild-index` derives every project's index from
 source records and replaces all stale or missing indexes together with the
@@ -94,7 +94,9 @@ effective scope.
 Import, review append, rebuild, and verified public readers cooperate through
 one physical-root lock, so readers observe a complete before or after
 generation rather than a replacement gap. Ownership-aware cleanup will not
-delete a path replaced by another writer. Uncooperative external processes are
-not serialized by this protocol; they may cause a safe failure or leave their
-own competing state, so atomicity claims apply to normal TraceLane writers
-rather than arbitrary filesystem mutation.
+delete a path replaced by another writer. These v1 guarantees cover TraceLane
+participants that honor the lock and ordinary caller, input, and filesystem
+failures. A same-account process that ignores the lock and deliberately moves
+or replaces TraceLane-owned namespace objects during an operation is outside
+the v1 threat model. Defensive checks remain in place but are not a claim of
+complete namespace custody against that actor.
