@@ -1,7 +1,7 @@
 # Project Evidence Registry Design
 
 **Date:** 2026-07-25
-**Status:** Proposed for written review
+**Status:** Approved
 **Scope:** Repository-tracked research evidence registry and the initial
 HIST-001 candidate import
 
