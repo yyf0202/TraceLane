@@ -1167,6 +1167,19 @@ class _FailingPathLike:
         raise OSError(13, "path coercion denied", str(self.sensitive_path))
 
 
+class _RaisingPathLike:
+    def __init__(
+        self,
+        sensitive_path: Path,
+        exception_type: type[ValueError] | type[RuntimeError],
+    ) -> None:
+        self.sensitive_path = sensitive_path
+        self.exception_type = exception_type
+
+    def __fspath__(self) -> str:
+        raise self.exception_type(f"path coercion denied: {self.sensitive_path}")
+
+
 @pytest.mark.parametrize(
     ("operation", "category"),
     [
@@ -1195,6 +1208,46 @@ def test_public_readers_sanitize_root_coercion_failures(
 ) -> None:
     sensitive_path = tmp_path / "private-reader-root"
     root = None if root_kind == "invalid" else _FailingPathLike(sensitive_path)
+
+    with pytest.raises(ValueError, match=category) as captured:
+        operation(root)
+
+    rendered = "".join(traceback.format_exception(captured.type, captured.value, captured.tb))
+    assert captured.value.__cause__ is None
+    assert str(tmp_path) not in rendered
+
+
+@pytest.mark.parametrize(
+    ("operation", "category"),
+    [
+        (
+            lambda root: build_project_index(root, "hist-001"),
+            "^evidence project index build failed$",
+        ),
+        (build_registry, "^evidence registry build failed$"),
+        (
+            lambda root: verify_evidence_registry(root, "hist-001"),
+            "^evidence verification failed$",
+        ),
+        (
+            lambda root: find_evidence(root, EvidenceQuery("hist-001")),
+            "^evidence query failed$",
+        ),
+    ],
+    ids=["project-build", "registry-build", "verify", "find"],
+)
+@pytest.mark.parametrize(
+    "exception_type",
+    [ValueError, RuntimeError],
+    ids=["value-error", "runtime-error"],
+)
+def test_public_readers_sanitize_path_like_value_and_runtime_errors(
+    tmp_path: Path,
+    operation,
+    category: str,
+    exception_type: type[ValueError] | type[RuntimeError],
+) -> None:
+    root = _RaisingPathLike(tmp_path / "private-reader-root", exception_type)
 
     with pytest.raises(ValueError, match=category) as captured:
         operation(root)

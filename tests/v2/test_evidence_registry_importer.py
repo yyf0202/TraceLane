@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
+import subprocess
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -132,6 +134,22 @@ def _tree_snapshot(root: Path) -> dict[str, tuple[object, ...]]:
             path.read_bytes() if stat.S_ISREG(metadata.st_mode) else None,
         )
     return snapshot
+
+
+def _redirect_directory(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+        return
+    except OSError:
+        if os.name != "nt":
+            raise
+    completed = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert completed.returncode == 0
 
 
 def test_project_directory_publication_never_replaces_even_an_empty_destination(
@@ -580,8 +598,15 @@ def test_post_publication_source_mutation_does_not_invalidate_copied_target(
     def mutate_after_project_publication(
         source_path: str | Path,
         target_path: str | Path,
+        *args: object,
+        **kwargs: object,
     ):
-        receipt = original_publish(Path(source_path), Path(target_path))
+        receipt = original_publish(
+            Path(source_path),
+            Path(target_path),
+            *args,
+            **kwargs,
+        )
         content_path.write_bytes(b"changed during project publication")
         return receipt
 
@@ -728,8 +753,14 @@ def test_interruption_before_project_publication_is_recoverable(
     original_publish = evidence_importer._publish_project_directory_no_replace
     attempted_source: Path | None = None
 
-    def interrupt_rename(source_path: str | Path, target_path: str | Path) -> None:
+    def interrupt_rename(
+        source_path: str | Path,
+        target_path: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
         nonlocal attempted_source
+        del args, kwargs
         attempted_source = Path(source_path)
         raise RuntimeError("injected interruption before project publication")
 
@@ -760,7 +791,13 @@ def test_project_publication_os_error_never_echoes_local_paths(
 ) -> None:
     source, target, project, metadata = _import_case(tmp_path, count=1)
 
-    def fail_with_path(source_path: str | Path, target_path: str | Path) -> None:
+    def fail_with_path(
+        source_path: str | Path,
+        target_path: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        del args, kwargs
         raise OSError(
             13,
             "rename denied",
@@ -795,8 +832,10 @@ def test_target_namespace_publication_race_preserves_winning_state(
     def publish_competing_project(
         source_path: str | Path,
         target_path: str | Path,
+        *args: object,
+        **kwargs: object,
     ) -> None:
-        del source_path
+        del source_path, args, kwargs
         final_project = Path(target_path)
         final_project.mkdir(parents=True)
         (final_project / "winner.marker").write_bytes(marker)
@@ -1185,6 +1224,116 @@ def test_import_rollback_preserves_replacement_swapped_after_quarantine_snapshot
     assert (competing_quarantine / "winner.marker").read_bytes() == marker
     assert saved_owned.is_dir()
     assert not (target / "projects" / "hist-001").exists()
+    assert not (target / "registry.json").exists()
+
+
+def test_import_retirement_parent_replacement_cannot_redirect_into_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_verify = evidence_importer.verify_evidence_registry
+    original_move = evidence_importer._move_project_directory_no_replace
+    saved_retired = tmp_path / "owned-retired-parent"
+    competing_marker = b"competing retirement parent\n"
+    swapped = False
+
+    def fail_final_verification(root: object, project_id: str | None = None):
+        root_path = Path(getattr(root, "path", root))
+        if root_path == target.resolve():
+            raise ValueError("injected final verification failure")
+        return original_verify(root, project_id)
+
+    def replace_parent_before_move(
+        source_path: str | Path,
+        target_path: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal swapped
+        destination = Path(target_path)
+        if not swapped and destination.name.startswith("project-"):
+            swapped = True
+            destination.parent.rename(saved_retired)
+            _redirect_directory(destination.parent, target / "projects")
+            (target / "projects" / "competing.marker").write_bytes(competing_marker)
+        original_move(source_path, target_path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "verify_evidence_registry",
+        fail_final_verification,
+    )
+    monkeypatch.setattr(
+        evidence_importer,
+        "_move_project_directory_no_replace",
+        replace_parent_before_move,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^evidence import quarantine requires maintenance$",
+    ):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert swapped
+    assert (target / "projects" / "competing.marker").read_bytes() == competing_marker
+    assert not any(path.name.startswith(("project-", "stage-")) for path in target.rglob("*"))
+    assert not (target / "projects" / "hist-001").exists()
+    assert not (target / "registry.json").exists()
+    retired_names = {path.name for path in saved_retired.iterdir()}
+    assert any(name.startswith("project-") for name in retired_names)
+    assert any(name.startswith("stage-") for name in retired_names)
+
+
+def test_publication_time_quarantine_mismatch_preserves_maintenance_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_snapshot = evidence_importer._project_directory_snapshot
+    final_project = target / "projects" / "hist-001"
+    saved_owned = tmp_path / "publication-owned-quarantine"
+    competing_marker = b"publication-time competing quarantine\n"
+    target_snapshots = 0
+    competing_quarantine: Path | None = None
+
+    def fail_publication_then_swap_quarantine(path: Path):
+        nonlocal competing_quarantine, target_snapshots
+        candidate = Path(path)
+        if candidate == final_project:
+            target_snapshots += 1
+            if target_snapshots == 1:
+                raise ValueError("injected publication validation failure")
+        snapshot = original_snapshot(candidate)
+        if (
+            competing_quarantine is None
+            and candidate.parent.name == "retired"
+            and candidate.name.startswith("project-")
+        ):
+            competing_quarantine = candidate
+            candidate.rename(saved_owned)
+            candidate.mkdir()
+            (candidate / "winner.marker").write_bytes(competing_marker)
+        return snapshot
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "_project_directory_snapshot",
+        fail_publication_then_swap_quarantine,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^evidence import quarantine requires maintenance$",
+    ):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert target_snapshots >= 2
+    assert competing_quarantine is not None
+    assert (competing_quarantine / "winner.marker").read_bytes() == competing_marker
+    assert saved_owned.is_dir()
+    assert not final_project.exists()
     assert not (target / "registry.json").exists()
 
 

@@ -62,10 +62,13 @@ ownership receipts and rolled back together on failure. Importer-owned project
 and staging directories are never recursively deleted by the online workflow.
 They are atomically retired under the target's sibling
 `.tracelane-staging/retired/` namespace with randomized names. That namespace is
-outside evidence discovery and verification, so retained residue is not part of
-the Evidence Registry. Removing retired residue is an explicit offline
-maintenance action after an operator has independently confirmed ownership; the
-import API does not clean it automatically.
+opened once and retained by physical directory handle for the transaction;
+retirement uses a handle-relative, no-replace move so replacing its pathname or
+an ancestor cannot redirect residue into the live Evidence Registry. The
+namespace is outside evidence discovery and verification, so retained residue
+is not part of the Evidence Registry. Removing retired residue is an explicit
+offline maintenance action after an operator has independently confirmed
+ownership; the import API does not clean it automatically.
 
 After a review append, `rebuild-index` derives every project's index from
 source records and replaces all stale or missing indexes together with the
