@@ -896,14 +896,56 @@ def test_staging_cleanup_os_error_never_echoes_local_paths(
 ) -> None:
     source, target, project, metadata = _import_case(tmp_path, count=1)
 
-    def fail_cleanup(path: str | Path) -> None:
-        raise OSError(13, "cleanup denied", str(path))
+    def fail_cleanup(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError(13, "cleanup denied", str(tmp_path / "private-stage"))
 
-    monkeypatch.setattr(evidence_importer.shutil, "rmtree", fail_cleanup)
+    monkeypatch.setattr(
+        evidence_importer,
+        "_retire_owned_directory",
+        fail_cleanup,
+    )
 
     report = import_acquisition_project(source, target, project, metadata)
 
     assert report.candidate_count == 1
+    assert verify_evidence_registry(target, "hist-001").candidate_count == 1
+
+
+def test_staging_cleanup_preserves_replacement_swapped_before_retirement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_cleanup = evidence_importer._safe_remove_stage
+    saved_owned = tmp_path / "owned-stage"
+    marker = b"competing staging replacement\n"
+    competing_stage: Path | None = None
+
+    def swap_before_cleanup(
+        stage_path: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal competing_stage
+        competing_stage = Path(stage_path)
+        competing_stage.rename(saved_owned)
+        competing_stage.mkdir()
+        (competing_stage / "winner.marker").write_bytes(marker)
+        original_cleanup(stage_path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "_safe_remove_stage",
+        swap_before_cleanup,
+    )
+
+    report = import_acquisition_project(source, target, project, metadata)
+
+    assert report.candidate_count == 1
+    assert competing_stage is not None
+    assert (competing_stage / "winner.marker").read_bytes() == marker
+    assert saved_owned.is_dir()
     assert verify_evidence_registry(target, "hist-001").candidate_count == 1
 
 
@@ -1088,6 +1130,61 @@ def test_import_rollback_preserves_competing_project_replacement(
 
     assert replaced
     assert (target / "projects" / "hist-001" / "winner.marker").read_bytes() == marker
+    assert not (target / "registry.json").exists()
+
+
+def test_import_rollback_preserves_replacement_swapped_after_quarantine_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_verify = evidence_importer.verify_evidence_registry
+    original_snapshot = evidence_importer._project_directory_snapshot
+    saved_owned = tmp_path / "owned-quarantine"
+    marker = b"competing quarantine replacement\n"
+    competing_quarantine: Path | None = None
+
+    def fail_final_verification(root: object, project_id: str | None = None):
+        root_path = Path(getattr(root, "path", root))
+        if root_path == target.resolve():
+            raise ValueError("injected final verification failure")
+        return original_verify(root, project_id)
+
+    def swap_after_quarantine_snapshot(path: Path):
+        nonlocal competing_quarantine
+        snapshot = original_snapshot(path)
+        candidate = Path(path)
+        if competing_quarantine is None and (
+            candidate.name.startswith(".evidence-project-rollback-")
+            or candidate.name.startswith("project-")
+        ):
+            competing_quarantine = candidate
+            candidate.rename(saved_owned)
+            candidate.mkdir()
+            (candidate / "winner.marker").write_bytes(marker)
+        return snapshot
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "verify_evidence_registry",
+        fail_final_verification,
+    )
+    monkeypatch.setattr(
+        evidence_importer,
+        "_project_directory_snapshot",
+        swap_after_quarantine_snapshot,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^evidence import quarantine requires maintenance$",
+    ):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert competing_quarantine is not None
+    assert (competing_quarantine / "winner.marker").read_bytes() == marker
+    assert saved_owned.is_dir()
+    assert not (target / "projects" / "hist-001").exists()
     assert not (target / "registry.json").exists()
 
 

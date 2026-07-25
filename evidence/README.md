@@ -58,7 +58,14 @@ The import commit point is the successful authenticated registry verification
 and construction of its report. Once reached, staging cleanup or output errors
 cannot turn the committed import into an ordinary reported failure. Before that
 point, a newly published project directory and registry replacement are held by
-ownership receipts and rolled back together on failure.
+ownership receipts and rolled back together on failure. Importer-owned project
+and staging directories are never recursively deleted by the online workflow.
+They are atomically retired under the target's sibling
+`.tracelane-staging/retired/` namespace with randomized names. That namespace is
+outside evidence discovery and verification, so retained residue is not part of
+the Evidence Registry. Removing retired residue is an explicit offline
+maintenance action after an operator has independently confirmed ownership; the
+import API does not clean it automatically.
 
 After a review append, `rebuild-index` derives every project's index from
 source records and replaces all stale or missing indexes together with the

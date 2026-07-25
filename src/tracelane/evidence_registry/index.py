@@ -1106,8 +1106,8 @@ def build_project_index(
     root: EvidenceRoot | str | Path,
     project_id: str,
 ) -> EvidenceProjectIndex:
-    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
     try:
+        root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
         with evidence_root_mutation_lock(root_path):
             return _build_project_index(root_path, project_id)
     except ValueError as exc:
@@ -1131,8 +1131,8 @@ def _build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
 
 
 def build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
-    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
     try:
+        root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
         with evidence_root_mutation_lock(root_path):
             return _build_registry(root_path)
     except ValueError as exc:
@@ -1383,8 +1383,8 @@ def verify_evidence_registry(
     root: EvidenceRoot | str | Path,
     project_id: str | None = None,
 ) -> VerificationReport:
-    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
     try:
+        root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
         with evidence_root_mutation_lock(root_path):
             return _verify_evidence_registry(root_path, project_id)
     except ValueError as exc:
@@ -1485,8 +1485,8 @@ def find_evidence(
     root: EvidenceRoot | str | Path,
     query: EvidenceQuery,
 ) -> tuple[EvidenceIndexEntry, ...]:
-    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
     try:
+        root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
         with evidence_root_mutation_lock(root_path):
             return _find_evidence(root_path, query)
     except ValueError as exc:

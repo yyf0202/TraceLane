@@ -360,6 +360,49 @@ def test_rebuild_adds_one_project_and_preserves_existing_project_entry(
     assert verify_evidence_registry(registry_root).project_count == 2
 
 
+def test_root_wide_rebuild_preserves_current_project_index_filesystem_identity(
+    registry_root: EvidenceRoot,
+) -> None:
+    _write_project(registry_root, project_id="hist-002")
+    second_candidate = _candidate(
+        registry_root,
+        ordinal=6,
+        document_date="1812-04-01",
+        date_precision="day",
+        project_id="hist-002",
+    )
+    rebuild_evidence_indexes(registry_root, "hist-002")
+    current_index = registry_root.resolve(
+        "tracelane://evidence/projects/hist-001/index.json",
+        must_exist=True,
+    )
+    before = current_index.lstat()
+    before_state = (
+        current_index.read_bytes(),
+        before.st_mode,
+        before.st_dev,
+        before.st_ino,
+        before.st_nlink,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+
+    _review(registry_root, second_candidate, "approved")
+    rebuild_evidence_indexes(registry_root, "hist-002")
+
+    after = current_index.lstat()
+    assert (
+        current_index.read_bytes(),
+        after.st_mode,
+        after.st_dev,
+        after.st_ino,
+        after.st_nlink,
+        after.st_size,
+        after.st_mtime_ns,
+    ) == before_state
+    assert verify_evidence_registry(registry_root).project_count == 2
+
+
 def test_root_wide_rebuild_recovers_two_projects_with_stale_review_state(
     registry_root: EvidenceRoot,
 ) -> None:
@@ -1114,6 +1157,51 @@ def test_exported_registry_apis_sanitize_injected_path_bearing_read_failures(
     assert str(secret_path) not in rendered
     assert secret_path.as_posix() not in rendered
     assert str(secret_path).replace("\\", "\\\\") not in rendered
+
+
+class _FailingPathLike:
+    def __init__(self, sensitive_path: Path) -> None:
+        self.sensitive_path = sensitive_path
+
+    def __fspath__(self) -> str:
+        raise OSError(13, "path coercion denied", str(self.sensitive_path))
+
+
+@pytest.mark.parametrize(
+    ("operation", "category"),
+    [
+        (
+            lambda root: build_project_index(root, "hist-001"),
+            "^evidence project index build failed$",
+        ),
+        (build_registry, "^evidence registry build failed$"),
+        (
+            lambda root: verify_evidence_registry(root, "hist-001"),
+            "^evidence verification failed$",
+        ),
+        (
+            lambda root: find_evidence(root, EvidenceQuery("hist-001")),
+            "^evidence query failed$",
+        ),
+    ],
+    ids=["project-build", "registry-build", "verify", "find"],
+)
+@pytest.mark.parametrize("root_kind", ["invalid", "path-like"])
+def test_public_readers_sanitize_root_coercion_failures(
+    tmp_path: Path,
+    operation,
+    category: str,
+    root_kind: str,
+) -> None:
+    sensitive_path = tmp_path / "private-reader-root"
+    root = None if root_kind == "invalid" else _FailingPathLike(sensitive_path)
+
+    with pytest.raises(ValueError, match=category) as captured:
+        operation(root)
+
+    rendered = "".join(traceback.format_exception(captured.type, captured.value, captured.tb))
+    assert captured.value.__cause__ is None
+    assert str(tmp_path) not in rendered
 
 
 def test_new_source_candidate_cannot_remain_unindexed(

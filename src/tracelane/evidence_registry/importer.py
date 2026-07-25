@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import stat
 import uuid
 from contextlib import suppress
@@ -70,6 +69,7 @@ _PUBLIC_IMPORT_ERRORS = frozenset(
         "acquisition transformations are not importable",
         "evidence import staging cleanup failed",
         "evidence import staging identity is invalid",
+        "evidence import quarantine requires maintenance",
         "evidence import target changed",
         "evidence import target conflicts",
         "evidence import target conflicts with existing project",
@@ -102,6 +102,16 @@ class _ProjectDirectoryPublicationReceipt:
     target: Path
     directory_identity: tuple[int, int]
     tree_snapshot: tuple[tuple[object, ...], ...]
+
+
+@dataclass(frozen=True)
+class _DirectoryOwnershipReceipt:
+    path: Path
+    directory_identity: tuple[int, int]
+
+
+class _DirectoryRetirementMaintenanceError(ValueError):
+    pass
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -372,6 +382,8 @@ def _safe_remove_stage(
     stage_path: Path,
     staging_namespace: Path,
     target: Path,
+    receipt: _DirectoryOwnershipReceipt,
+    retired_namespace: Path,
 ) -> None:
     expected_namespace = target.parent / ".tracelane-staging"
     prefix = _staging_prefix(target)
@@ -384,11 +396,16 @@ def _safe_remove_stage(
         or stage_path.is_symlink()
     ):
         raise ValueError("evidence import staging identity is invalid")
-    if stage_path.exists():
-        try:
-            shutil.rmtree(stage_path)
-        except OSError:
-            raise ValueError("evidence import staging cleanup failed") from None
+    if receipt.path != stage_path:
+        raise ValueError("evidence import staging identity is invalid")
+    try:
+        _retire_owned_directory(
+            receipt,
+            retired_namespace,
+            prefix="stage",
+        )
+    except (OSError, TypeError, ValueError):
+        raise ValueError("evidence import staging cleanup failed") from None
 
 
 def _authenticate_existing_project(
@@ -549,6 +566,21 @@ def _project_directory_snapshot(path: Path) -> tuple[tuple[object, ...], ...]:
         raise ValueError("project publication tree is invalid") from exc
 
 
+def _directory_identity(path: Path) -> tuple[int, int]:
+    try:
+        metadata = Path(path).lstat()
+    except OSError as exc:
+        raise ValueError("owned directory is unavailable") from exc
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or bool(getattr(metadata, "st_file_attributes", 0) & reparse_flag)
+        or not stat.S_ISDIR(metadata.st_mode)
+    ):
+        raise ValueError("owned directory identity is invalid")
+    return metadata.st_dev, metadata.st_ino
+
+
 def _move_project_directory_no_replace(source: Path, target: Path) -> None:
     source = Path(source)
     target = Path(target)
@@ -617,6 +649,39 @@ def _move_project_directory_no_replace(source: Path, target: Path) -> None:
     raise OSError(errno.ENOTSUP, "atomic no-replace directory publication is unavailable")
 
 
+def _retire_owned_directory(
+    receipt: _DirectoryOwnershipReceipt,
+    retired_namespace: Path,
+    *,
+    prefix: str,
+    tree_snapshot: tuple[tuple[object, ...], ...] | None = None,
+) -> Path:
+    if not isinstance(receipt, _DirectoryOwnershipReceipt):
+        raise ValueError("directory ownership receipt is invalid")
+    source = receipt.path
+    if _directory_identity(source) != receipt.directory_identity:
+        raise ValueError("owned directory changed before retirement")
+    if tree_snapshot is not None and _project_directory_snapshot(source) != tree_snapshot:
+        raise ValueError("owned directory tree changed before retirement")
+
+    namespace = ArtifactRoot(retired_namespace).path
+    retired = namespace / f"{prefix}-{uuid.uuid4().hex}"
+    _move_project_directory_no_replace(source, retired)
+
+    try:
+        if _directory_identity(retired) != receipt.directory_identity:
+            raise ValueError("retired directory identity changed")
+        if tree_snapshot is not None and _project_directory_snapshot(retired) != tree_snapshot:
+            raise ValueError("retired directory tree changed")
+        if _directory_identity(retired) != receipt.directory_identity:
+            raise ValueError("retired directory identity changed")
+        if source.exists() or source.is_symlink():
+            raise ValueError("owned directory retirement did not clear its live path")
+    except (OSError, TypeError, ValueError) as exc:
+        raise _DirectoryRetirementMaintenanceError from exc
+    return retired
+
+
 def _publish_project_directory_no_replace(
     source: Path,
     target: Path,
@@ -646,6 +711,7 @@ def _publish_project_directory_no_replace(
 
 def _rollback_project_directory_publication(
     receipt: _ProjectDirectoryPublicationReceipt,
+    retired_namespace: Path | None = None,
 ) -> None:
     if not isinstance(receipt, _ProjectDirectoryPublicationReceipt):
         raise ValueError("project publication receipt is invalid")
@@ -660,18 +726,27 @@ def _rollback_project_directory_publication(
         or current_snapshot != receipt.tree_snapshot
     ):
         raise ValueError("project publication rollback target changed")
-    tombstone = target.parent / f".evidence-project-rollback-{uuid.uuid4().hex}"
+    namespace = (
+        Path(retired_namespace)
+        if retired_namespace is not None
+        else (
+            target.parent.parent.parent / ".tracelane-staging" / "retired"
+            if target.parent.name == "projects"
+            else target.parent / ".tracelane-staging" / "retired"
+        )
+    )
     try:
-        _move_project_directory_no_replace(target, tombstone)
-        if _project_directory_snapshot(tombstone) != receipt.tree_snapshot:
-            try:
-                _move_project_directory_no_replace(tombstone, target)
-            except (OSError, TypeError, ValueError):
-                raise ValueError("project publication rollback restore failed") from None
-            raise ValueError("project publication rollback target changed")
-        shutil.rmtree(tombstone)
-        if target.exists() or target.is_symlink() or tombstone.exists() or tombstone.is_symlink():
-            raise ValueError("project publication rollback failed")
+        _retire_owned_directory(
+            _DirectoryOwnershipReceipt(
+                path=target,
+                directory_identity=receipt.directory_identity,
+            ),
+            namespace,
+            prefix="project",
+            tree_snapshot=receipt.tree_snapshot,
+        )
+    except _DirectoryRetirementMaintenanceError as exc:
+        raise ValueError("project publication quarantine requires maintenance") from exc
     except (OSError, TypeError, ValueError) as exc:
         raise ValueError("project publication rollback failed") from exc
 
@@ -692,9 +767,16 @@ def _import_acquisition_project(
     try:
         with evidence_root_mutation_lock(target_path):
             staging_namespace, stage_path = _staging_location(target_path)
+            retired_namespace = ArtifactRoot(staging_namespace / "retired").path
+            stage_receipt: _DirectoryOwnershipReceipt | None = None
             project_receipt: _ProjectDirectoryPublicationReceipt | None = None
             registry_receipt: JsonReplacementReceipt | None = None
             try:
+                staged_root = EvidenceRoot.create(stage_path)
+                stage_receipt = _DirectoryOwnershipReceipt(
+                    path=staged_root.path,
+                    directory_identity=staged_root._opened_identity,
+                )
                 stage, expected_index = _build_staged_project(
                     stage_path,
                     project,
@@ -773,6 +855,7 @@ def _import_acquisition_project(
             except BaseException:
                 if committed_report is None:
                     rollback_failed = False
+                    quarantine_requires_maintenance = False
                     if registry_receipt is not None:
                         try:
                             rollback_json_replacement(target, registry_receipt)
@@ -780,19 +863,31 @@ def _import_acquisition_project(
                             rollback_failed = True
                     if project_receipt is not None:
                         try:
-                            _rollback_project_directory_publication(project_receipt)
-                        except (OSError, TypeError, ValueError):
-                            rollback_failed = True
+                            _rollback_project_directory_publication(
+                                project_receipt,
+                                retired_namespace,
+                            )
+                        except (OSError, TypeError, ValueError) as exc:
+                            if str(exc) == "project publication quarantine requires maintenance":
+                                quarantine_requires_maintenance = True
+                            else:
+                                rollback_failed = True
+                    if quarantine_requires_maintenance:
+                        raise ValueError(
+                            "evidence import quarantine requires maintenance"
+                        ) from None
                     if rollback_failed:
                         raise ValueError("evidence import target is invalid") from None
                 raise
             finally:
-                if stage_path.exists() or stage_path.is_symlink():
+                if stage_receipt is not None:
                     try:
                         _safe_remove_stage(
                             stage_path,
                             staging_namespace,
                             target_path,
+                            stage_receipt,
+                            retired_namespace,
                         )
                     except ValueError:
                         if committed_report is None:
