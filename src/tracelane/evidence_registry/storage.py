@@ -16,6 +16,7 @@ from tracelane.v2.contracts import ArtifactRef
 from tracelane.v2.storage import atomic_create_bytes, secure_read_bytes
 
 _EVIDENCE_PREFIX = "tracelane://evidence/"
+_MAX_DISK_COMPONENT_CHARS = 255
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _URI_COMPONENT = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
@@ -555,13 +556,18 @@ class EvidenceRoot:
             raise ValueError("evidence URI is unsafe")
         parts = raw_relative.split("/")
         if any(
-            part in {"", ".", ".."} or _URI_COMPONENT.fullmatch(part) is None for part in parts
+            part in {"", ".", ".."}
+            or len(part) > _MAX_DISK_COMPONENT_CHARS
+            or _URI_COMPONENT.fullmatch(part) is None
+            for part in parts
         ):
             raise ValueError("evidence URI is unsafe")
 
         physical_parts = parts
         is_project_document = (
-            len(parts) == 3 and parts[0] == "projects" and parts[2] == "project.json"
+            len(parts) == 3
+            and parts[0] == "projects"
+            and parts[2] in {"index.json", "project.json"}
         )
         is_project_record = (
             len(parts) == 4
@@ -626,8 +632,16 @@ class EvidenceRoot:
         return candidate
 
     def ensure_parent(self, target: Path) -> None:
+        supplied_parent = Path(target).parent
         try:
-            relative_parent = target.parent.relative_to(self.path)
+            raw_relative_parent = supplied_parent.relative_to(self.path)
+        except ValueError as exc:
+            raise ValueError("evidence path escapes the evidence root") from exc
+        if any(part in {".", ".."} for part in raw_relative_parent.parts):
+            raise ValueError("evidence path is unsafe")
+        normalized_parent = _absolute(supplied_parent)
+        try:
+            relative_parent = normalized_parent.relative_to(self.path)
         except ValueError as exc:
             raise ValueError("evidence path escapes the evidence root") from exc
         self._validate_open_identity()

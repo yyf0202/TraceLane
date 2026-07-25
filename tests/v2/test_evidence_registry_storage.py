@@ -29,6 +29,7 @@ def evidence_root(tmp_path: Path) -> EvidenceRoot:
     ("uri", "relative"),
     [
         ("tracelane://evidence/projects/hist-001/project.json", "projects/hist-001/project.json"),
+        ("tracelane://evidence/projects/hist-001/index.json", "projects/hist-001/index.json"),
         (
             "tracelane://evidence/projects/hist-001/candidates/candidate_a.json",
             "projects/hist-001/candidates/candidate_a.json",
@@ -65,7 +66,6 @@ def test_resolve_maps_logical_blob_uri_to_sharded_physical_path(
     "uri",
     [
         "tracelane://evidence/unlisted/namespace.json",
-        "tracelane://evidence/projects/hist-001/index.json",
         "tracelane://evidence/projects/hist-001/import.json",
         "tracelane://evidence/projects/hist-001/project.json/extra",
         "tracelane://evidence/projects/hist-001/candidates",
@@ -74,6 +74,21 @@ def test_resolve_maps_logical_blob_uri_to_sharded_physical_path(
     ],
 )
 def test_resolve_rejects_unlisted_or_extra_depth_namespaces(
+    evidence_root: EvidenceRoot,
+    uri: str,
+) -> None:
+    with pytest.raises(ValueError, match="evidence URI"):
+        evidence_root.resolve(uri)
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        f"tracelane://evidence/projects/{'a' * 256}/project.json",
+        f"tracelane://evidence/projects/hist-001/candidates/{'a' * 251}.json",
+    ],
+)
+def test_resolve_rejects_overlong_disk_components(
     evidence_root: EvidenceRoot,
     uri: str,
 ) -> None:
@@ -145,6 +160,26 @@ def test_create_and_open_are_idempotent_for_an_existing_safe_root(tmp_path: Path
     assert created.path == root_path.resolve()
     assert created_again.path == created.path
     assert opened.path == created.path
+
+
+@pytest.mark.parametrize(
+    "target_parts",
+    [
+        ("..", "outside", "payload"),
+        ("safe", "..", "..", "outside", "payload"),
+    ],
+)
+def test_ensure_parent_rejects_dot_segment_escape_without_mutation(
+    evidence_root: EvidenceRoot,
+    tmp_path: Path,
+    target_parts: tuple[str, ...],
+) -> None:
+    target = evidence_root.path.joinpath(*target_parts)
+
+    with pytest.raises(ValueError, match="evidence path (?:is unsafe|escapes)"):
+        evidence_root.ensure_parent(target)
+
+    assert not (tmp_path / "outside").exists()
 
 
 def test_create_rejects_a_link_in_existing_ancestors(tmp_path: Path) -> None:
@@ -478,6 +513,26 @@ def test_json_write_is_canonical_utf8_and_create_or_match(
         first,
         expected_kind="evidence_project",
         expected_schema_id="tracelane://schemas/evidence-project/v1",
+    ) == value
+
+
+def test_project_index_json_round_trip(evidence_root: EvidenceRoot) -> None:
+    uri = "tracelane://evidence/projects/hist-001/index.json"
+    value = {"entries": []}
+
+    reference = write_json_create_or_match(
+        evidence_root,
+        uri,
+        "evidence_project_index",
+        "tracelane://schemas/evidence-project-index/v1",
+        value,
+    )
+
+    assert read_json_object(
+        evidence_root,
+        reference,
+        expected_kind="evidence_project_index",
+        expected_schema_id="tracelane://schemas/evidence-project-index/v1",
     ) == value
 
 
