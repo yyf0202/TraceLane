@@ -32,6 +32,7 @@ from tracelane.v2.storage import (
 )
 
 from .contracts import (
+    AcquisitionCandidateClosure,
     CandidateReview,
     EvidenceCandidate,
     canonical_source_url,
@@ -650,6 +651,105 @@ class ManualAcquisitionService:
 
     def candidate_path(self, candidate_id: str) -> Path:
         return self._root.resolve(_candidate_uri(self._session_id, candidate_id))
+
+    @staticmethod
+    def _authenticate_snapshot_bytes(
+        reference: ArtifactRef,
+        data: bytes,
+    ) -> None:
+        if (
+            len(data) != reference.size_bytes
+            or hashlib.sha256(data).hexdigest() != reference.sha256
+        ):
+            raise ValueError("acquisition snapshot artifact identity is invalid")
+
+    def _snapshot_candidates_locked(
+        self,
+    ) -> tuple[bytes, tuple[AcquisitionCandidateClosure, ...]]:
+        manifest_bytes = secure_read_bytes(
+            self._manifest_path,
+            root=self._root.path,
+            label="acquisition snapshot manifest",
+        )
+        if manifest_bytes != _json_bytes(self._manifest):
+            raise ValueError("acquisition snapshot manifest identity is invalid")
+        closures: list[AcquisitionCandidateClosure] = []
+        references = tuple(
+            ArtifactRef.from_dict(item)
+            for item in self._manifest["candidate_refs"]  # type: ignore[union-attr]
+        )
+        for candidate_ref in references:
+            if (
+                candidate_ref.kind != "evidence_candidate"
+                or candidate_ref.schema_id != "tracelane://schemas/evidence-candidate/v2"
+            ):
+                raise ValueError("acquisition snapshot candidate metadata is invalid")
+            candidate_path = self._root.resolve(candidate_ref.uri)
+            candidate_bytes = secure_read_bytes(
+                candidate_path,
+                root=self._root.path,
+                label="acquisition snapshot candidate",
+            )
+            self._authenticate_snapshot_bytes(candidate_ref, candidate_bytes)
+            try:
+                candidate_value = json.loads(candidate_bytes.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError("acquisition snapshot candidate is invalid") from exc
+            if not isinstance(candidate_value, Mapping):
+                raise ValueError("acquisition snapshot candidate is invalid")
+            candidate = EvidenceCandidate.from_dict(candidate_value)
+            if candidate_ref.uri != _candidate_uri(
+                self._session_id,
+                candidate.candidate_id,
+            ):
+                raise ValueError("acquisition snapshot candidate lineage is invalid")
+
+            content_path = self._root.resolve(candidate.content_ref.uri)
+            content_bytes = secure_read_bytes(
+                content_path,
+                root=self._root.path,
+                label="acquisition snapshot content",
+            )
+            self._authenticate_snapshot_bytes(candidate.content_ref, content_bytes)
+            transformations: list[tuple[ArtifactRef, bytes]] = []
+            for transformation_ref in candidate.transformation_refs:
+                transformation_path = self._root.resolve(transformation_ref.uri)
+                transformation_bytes = secure_read_bytes(
+                    transformation_path,
+                    root=self._root.path,
+                    label="acquisition snapshot transformation",
+                )
+                self._authenticate_snapshot_bytes(
+                    transformation_ref,
+                    transformation_bytes,
+                )
+                transformations.append((transformation_ref, transformation_bytes))
+            closures.append(
+                AcquisitionCandidateClosure(
+                    candidate_ref=candidate_ref,
+                    candidate=candidate,
+                    candidate_bytes=candidate_bytes,
+                    content_bytes=content_bytes,
+                    transformations=tuple(transformations),
+                )
+            )
+        return manifest_bytes, tuple(closures)
+
+    def snapshot_candidates(self) -> tuple[AcquisitionCandidateClosure, ...]:
+        with self._session_lock():
+            try:
+                self._reload_session_state()
+                initial = self._snapshot_candidates_locked()
+            except ValueError as exc:
+                raise ValueError("acquisition source snapshot is invalid") from exc
+            try:
+                self._reload_session_state()
+                final = self._snapshot_candidates_locked()
+            except ValueError as exc:
+                raise ValueError("acquisition source snapshot changed") from exc
+            if final != initial:
+                raise ValueError("acquisition source snapshot changed")
+            return final[1]
 
     def _write_or_load_candidate(
         self,

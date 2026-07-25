@@ -16,3 +16,4 @@ artifacts/
 .worktrees/
 .DS_Store
 Thumbs.db
+/.tracelane-locks/

@@ -178,6 +178,15 @@ class EvidenceCandidate:
 
 
 @dataclass(frozen=True)
+class AcquisitionCandidateClosure:
+    candidate_ref: ArtifactRef
+    candidate: EvidenceCandidate
+    candidate_bytes: bytes
+    content_bytes: bytes
+    transformations: tuple[tuple[ArtifactRef, bytes], ...]
+
+
+@dataclass(frozen=True)
 class CandidateReview:
     content_sha256: str
     candidate_id: str

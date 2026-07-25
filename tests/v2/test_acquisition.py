@@ -131,6 +131,108 @@ def tree_snapshot(root: Path) -> dict[str, bytes]:
     }
 
 
+def test_snapshot_candidates_returns_authenticated_immutable_closure_without_writes(
+    service: ManualAcquisitionService,
+    tmp_path: Path,
+) -> None:
+    transformation_ref = BlobStore(ArtifactRoot(tmp_path)).put_bytes(
+        b"opaque transformation",
+        "application/octet-stream",
+        "evidence_transformation",
+    )
+    candidate = ingest_candidate(
+        service,
+        curated_text="authenticated source text",
+        transformation_refs=(transformation_ref,),
+    )
+    before = tree_snapshot(tmp_path)
+
+    closures = service.snapshot_candidates()
+
+    assert tree_snapshot(tmp_path) == before
+    assert len(closures) == 1
+    closure = closures[0]
+    assert isinstance(closure, acquisition_contracts.AcquisitionCandidateClosure)
+    assert closure.candidate == candidate
+    assert closure.candidate_bytes == (canonical_json(candidate.to_dict()) + "\n").encode()
+    assert closure.content_bytes == b"authenticated source text"
+    assert closure.transformations == ((transformation_ref, b"opaque transformation"),)
+    with pytest.raises(TypeError):
+        closures[0] = closure  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "member",
+    ["manifest", "candidate", "content", "transformation", "inventory"],
+)
+def test_snapshot_candidates_fails_closed_for_mutated_closure_member(
+    tmp_path: Path,
+    member: str,
+) -> None:
+    service = make_service(tmp_path)
+    transformation_ref = BlobStore(ArtifactRoot(tmp_path)).put_bytes(
+        b"opaque transformation",
+        "application/octet-stream",
+        "evidence_transformation",
+    )
+    candidate = ingest_candidate(
+        service,
+        curated_text="authenticated source text",
+        transformation_refs=(transformation_ref,),
+    )
+    if member == "manifest":
+        target = service.session_dir / "manifest.json"
+    elif member == "candidate":
+        target = service.candidate_path(candidate.candidate_id)
+    elif member == "content":
+        target = ArtifactRoot(tmp_path).resolve(candidate.content_ref.uri)
+    elif member == "transformation":
+        target = ArtifactRoot(tmp_path).resolve(transformation_ref.uri)
+    else:
+        target = service.session_dir / "candidates" / "unreferenced.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if member == "inventory":
+        target.write_text("{}\n", encoding="utf-8")
+    else:
+        target.write_bytes(target.read_bytes() + b"changed")
+
+    with pytest.raises(ValueError, match="acquisition"):
+        service.snapshot_candidates()
+
+
+def test_snapshot_candidates_revalidates_source_before_return(
+    service: ManualAcquisitionService,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = ingest_candidate(service, curated_text="authenticated source text")
+    content_path = ArtifactRoot(tmp_path).resolve(candidate.content_ref.uri)
+    original_read = acquisition_service.secure_read_bytes
+    mutated = False
+
+    def mutate_after_first_snapshot_content_read(
+        path: str | Path,
+        *,
+        root: str | Path | None = None,
+        label: str = "file",
+    ) -> bytes:
+        nonlocal mutated
+        data = original_read(path, root=root, label=label)
+        if label == "acquisition snapshot content" and not mutated:
+            mutated = True
+            content_path.write_bytes(b"mutated after snapshot")
+        return data
+
+    monkeypatch.setattr(
+        acquisition_service,
+        "secure_read_bytes",
+        mutate_after_first_snapshot_content_read,
+    )
+
+    with pytest.raises(ValueError, match="acquisition source snapshot changed"):
+        service.snapshot_candidates()
+
+
 def leave_pending_promotion(
     service: ManualAcquisitionService,
     candidate: EvidenceCandidate,

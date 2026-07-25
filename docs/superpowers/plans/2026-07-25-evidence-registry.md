@@ -926,6 +926,13 @@ Within the existing session lock:
 
 The method performs no write when the session is already clean.
 
+The acquisition snapshot authenticates and returns legacy opaque
+`evidence_transformation` bytes. The v1 importer rejects any candidate with
+non-empty acquisition `transformation_refs` because this plan defines no
+lossless mapping from those opaque bytes to the structured
+`EvidenceTransformation` contract. The initial HIST-001 acquisition candidates
+have empty transformation references.
+
 - [ ] **Step 4: Write failing importer transaction tests**
 
 Cover:

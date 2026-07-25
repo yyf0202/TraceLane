@@ -6,6 +6,10 @@ from tracelane.evidence_registry.contracts import (
     ProjectEvidenceCandidate,
     candidate_record_digest,
 )
+from tracelane.evidence_registry.importer import (
+    EvidenceImportReport,
+    import_acquisition_project,
+)
 from tracelane.evidence_registry.index import (
     EvidenceIndexEntry,
     EvidenceProjectIndex,
@@ -38,6 +42,7 @@ from tracelane.evidence_registry.storage import (
 __all__ = [
     "EvidenceBlobStore",
     "EvidenceImportMetadata",
+    "EvidenceImportReport",
     "EvidenceImportRow",
     "EvidenceIndexEntry",
     "EvidenceProject",
@@ -58,6 +63,7 @@ __all__ = [
     "current_review",
     "effective_status",
     "find_evidence",
+    "import_acquisition_project",
     "read_json_object",
     "rebuild_project_index",
     "rebuild_registry",
