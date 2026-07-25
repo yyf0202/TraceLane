@@ -158,6 +158,7 @@ with these field groups:
 
 **Source**
 
+- stable source-specification ID;
 - query used to locate it;
 - canonical source URL;
 - title;
@@ -386,6 +387,10 @@ The nine records cover:
 7. the December 1810 conscription recommendation;
 8. the 1811 conscription record; and
 9. the December 1812 29th Bulletin.
+
+The nine records derive from seven stable source-specification IDs. A source
+specification that yields more than one dated document retains one
+source-specification ID while each dated candidate keeps its own candidate ID.
 
 The 29th Bulletin is imported with role `future-control`. It remains searchable
 for audit and grader construction but must never appear in the clean agent

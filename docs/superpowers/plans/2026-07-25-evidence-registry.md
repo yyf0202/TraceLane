@@ -144,10 +144,10 @@ filesystem primitives, argparse, pytest, and Ruff. No new dependency.
   - `candidate_record_digest(value) -> str`
 
 `EvidenceImportRow` contains candidate ID, candidate record/content digests,
-source type, license basis, content authorship, retention policy, sorted
-domains, sorted fact IDs, and role. `EvidenceImportMetadata` contains schema
-identity, session ID, acquisition manifest content digest, sorted rows, and its
-own content digest.
+stable source-specification ID, source type, license basis, content authorship,
+retention policy, sorted domains, sorted fact IDs, and role.
+`EvidenceImportMetadata` contains schema identity, session ID, acquisition
+manifest content digest, sorted rows, and its own content digest.
 
 - [ ] **Step 1: Write failing positive and negative contract tests**
 
@@ -221,6 +221,10 @@ content_authorship: repository_authored | third_party
 retention_policy:
   paraphrase_only | public_domain_full_text | licensed_full_text
 ```
+
+`source_spec_id` is a required lowercase identifier such as
+`hist001_tilsit_treaty`. Multiple dated candidates from one source
+specification share this field while retaining distinct candidate IDs.
 
 The transformation schema requires typed input/output ArtifactRefs and:
 
@@ -780,8 +784,8 @@ git commit -m "feat: import acquisition evidence projects"
 
 Generate an acquisition package in `tmp_path`. Require
 `candidate-metadata.json` to contain exact candidate IDs, record/content
-digests, source type, license basis, content authorship, retention policy,
-domains, fact IDs, and role.
+digests, stable source-specification ID, source type, license basis, content
+authorship, retention policy, domains, fact IDs, and role.
 
 Expected initial values:
 
