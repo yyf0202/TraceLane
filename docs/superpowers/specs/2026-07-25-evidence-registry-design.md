@@ -327,7 +327,7 @@ Each sorted index entry contains:
 - domains;
 - fact IDs;
 - content digest;
-- license class; and
+- license class, derived from the candidate `retention_policy`; and
 - transformation IDs.
 
 The index supports deterministic filtering by:
@@ -345,6 +345,12 @@ The index supports deterministic filtering by:
 
 Rebuilding an unchanged project index must produce byte-identical canonical
 JSON. The global registry follows the same rule.
+
+Year, month, and day dates represent closed calendar intervals. An estimated
+date uses the granularity present in its stored value. Range queries use
+inclusive interval intersection. Cutoff verification is conservative: the end
+of a non-future-control candidate's possible interval must not exceed the
+project cutoff.
 
 The initial command surface is:
 

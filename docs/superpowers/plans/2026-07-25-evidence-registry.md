@@ -701,6 +701,57 @@ class VerificationReport:
 record digest. `EvidenceRegistryEntry` stores project refs and digests.
 `EvidenceRegistry` stores sorted project entries and its record digest.
 
+The exact index/registry wire shapes are:
+
+```text
+EvidenceIndexEntry
+  candidate_id
+  candidate_ref: ArtifactRef(kind=evidence_candidate,
+                  schema_id=tracelane://schemas/project-evidence-candidate/v1)
+  effective_status: pending | approved | rejected | superseded
+  current_review_ref: optional ArtifactRef(
+                        kind=evidence_review,
+                        schema_id=tracelane://schemas/evidence-review/v1)
+  document_date
+  date_precision
+  source_type
+  role
+  domains: sorted unique strings
+  fact_ids: sorted unique strings
+  content_sha256
+  license_class: the candidate retention_policy
+  transformation_ids: sorted unique transformation IDs
+
+EvidenceProjectIndex
+  schema_id = tracelane://schemas/evidence-project-index/v1
+  schema_version = 1.0.0
+  record_sha256
+  project_id
+  entries: sorted unique by candidate_id
+  status_counts: exact keys pending, approved, rejected, superseded
+
+EvidenceRegistryEntry
+  project_id
+  title
+  status
+  project_ref: ArtifactRef(kind=evidence_project,
+               schema_id=tracelane://schemas/evidence-project/v1)
+  index_ref: ArtifactRef(kind=evidence_project_index,
+             schema_id=tracelane://schemas/evidence-project-index/v1)
+
+EvidenceRegistry
+  schema_id = tracelane://schemas/evidence-registry/v1
+  schema_version = 1.0.0
+  record_sha256
+  projects: sorted unique by project_id
+```
+
+`record_sha256` always covers the complete wire object except itself.
+`VerificationReport.registry_sha256` and `project_index_sha256` are the
+SHA-256 values of the canonical persisted JSON bytes from their
+`ArtifactRef`s, not the embedded record digests. `project_index_sha256` is
+present only for a project-scoped verification.
+
 - [ ] **Step 1: Write failing deterministic-index tests**
 
 Build a project with approved, rejected, superseded, pending, and
@@ -755,6 +806,15 @@ Verification order:
 
 Do not trust persisted index fields to locate source records.
 
+The managed project inventory allows only `README.md`, `project.json`,
+`index.json`, and the `candidates`, `reviews`, and `transformations`
+directories. Within those three managed directories, every regular JSON file
+must be consumed exactly once by the source-derived index; extra files,
+unsupported extensions, links/reparse points, and unreferenced
+review/transformation records are errors. Unreferenced global content blobs
+are permitted because an interrupted import may publish harmless
+content-addressed blobs before project publication.
+
 - [ ] **Step 5: Implement query filters**
 
 `EvidenceQuery` has optional project ID, statuses, fact ID, domain, role,
@@ -764,6 +824,13 @@ precision by converting year/month/day to conservative closed intervals.
 Project verification compares every candidate date and precision with the
 project cutoff and rejects post-cutoff candidates whose role is not
 `future-control`.
+
+Candidate dates and query bounds are closed intervals. Year/month/day values
+expand to their complete calendar interval; `estimated` uses the granularity
+present in `document_date`. A candidate matches a range when its possible
+interval intersects the inclusive query interval. For cutoff enforcement, a
+non-future-control candidate is admissible only when the end of its possible
+interval is no later than the project cutoff.
 
 - [ ] **Step 6: Run index, corruption, and schema checks**
 
