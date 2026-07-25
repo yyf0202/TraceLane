@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/evidence-transformation/v1",
+  "title": "TraceLane Evidence Transformation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_sha256",
+    "transformation_id",
+    "project_id",
+    "candidate_id",
+    "transformation_type",
+    "input_ref",
+    "output_ref",
+    "actor",
+    "method",
+    "parameters",
+    "created_at",
+    "license_implications"
+  ],
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "media_type",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schema_id": {
+          "type": "string",
+          "pattern": "^tracelane://schemas/[a-z0-9][a-z0-9-]*/v[0-9]+$"
+        }
+      }
+    },
+    "blob_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "evidence_blob"
+            }
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "schema_id"
+            ]
+          }
+        }
+      ]
+    },
+    "json_value": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/json_value"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/json_value"
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema_id": {
+      "const": "tracelane://schemas/evidence-transformation/v1"
+    },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "record_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "transformation_id": {
+      "type": "string",
+      "pattern": "^transformation_[0-9a-f]{24}$"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,63}$"
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^candidate_[0-9a-f]{24}$"
+    },
+    "transformation_type": {
+      "enum": [
+        "manual_excerpt",
+        "repository_paraphrase",
+        "translation",
+        "ocr",
+        "normalization"
+      ]
+    },
+    "input_ref": {
+      "$ref": "#/$defs/blob_ref"
+    },
+    "output_ref": {
+      "$ref": "#/$defs/blob_ref"
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "method": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/json_value"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "license_implications": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

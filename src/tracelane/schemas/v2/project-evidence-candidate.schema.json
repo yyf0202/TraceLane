@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tracelane://schemas/project-evidence-candidate/v1",
+  "title": "TraceLane Project Evidence Candidate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "record_sha256",
+    "project_id",
+    "candidate_id",
+    "source_spec_id",
+    "query",
+    "title",
+    "source_url",
+    "document_date",
+    "date_precision",
+    "retrieved_at",
+    "curator",
+    "source_type",
+    "role",
+    "domains",
+    "fact_ids",
+    "content_ref",
+    "transformation_refs",
+    "content_sha256",
+    "content_authorship",
+    "retention_policy",
+    "license_basis",
+    "acquisition_session_id",
+    "source_candidate_uri",
+    "source_candidate_id",
+    "source_candidate_record_sha256",
+    "source_candidate_content_sha256",
+    "trust_level"
+  ],
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "uri",
+        "media_type",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^tracelane://[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+        },
+        "media_type": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schema_id": {
+          "type": "string",
+          "pattern": "^tracelane://schemas/[a-z0-9][a-z0-9-]*/v[0-9]+$"
+        }
+      }
+    },
+    "content_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "evidence_blob"
+            },
+            "uri": {
+              "pattern": "^tracelane://evidence/blobs/sha256/[0-9a-f]{64}$"
+            }
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "schema_id"
+            ]
+          }
+        }
+      ]
+    },
+    "transformation_ref": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/artifact_ref"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "evidence_transformation"
+            }
+          }
+        },
+        {
+          "not": {
+            "required": [
+              "schema_id"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema_id": {
+      "const": "tracelane://schemas/project-evidence-candidate/v1"
+    },
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "record_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,63}$"
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^candidate_[0-9a-f]{24}$"
+    },
+    "source_spec_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$"
+    },
+    "query": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_url": {
+      "type": "string",
+      "pattern": "^https://"
+    },
+    "document_date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}(?:-[0-9]{2}(?:-[0-9]{2})?)?$"
+    },
+    "date_precision": {
+      "enum": [
+        "day",
+        "month",
+        "year",
+        "estimated"
+      ]
+    },
+    "retrieved_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "curator": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_type": {
+      "enum": [
+        "primary",
+        "secondary",
+        "dataset"
+      ]
+    },
+    "role": {
+      "enum": [
+        "evidence",
+        "future-control"
+      ]
+    },
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "fact_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "content_ref": {
+      "$ref": "#/$defs/content_ref"
+    },
+    "transformation_refs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/transformation_ref"
+      }
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "content_authorship": {
+      "enum": [
+        "repository_authored",
+        "third_party"
+      ]
+    },
+    "retention_policy": {
+      "enum": [
+        "paraphrase_only",
+        "public_domain_full_text",
+        "licensed_full_text"
+      ]
+    },
+    "license_basis": {
+      "type": "string",
+      "minLength": 1
+    },
+    "acquisition_session_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{2,63}$"
+    },
+    "source_candidate_uri": {
+      "type": "string",
+      "pattern": "^tracelane://artifacts/[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
+    },
+    "source_candidate_id": {
+      "type": "string",
+      "pattern": "^candidate_[0-9a-f]{24}$"
+    },
+    "source_candidate_record_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_candidate_content_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "trust_level": {
+      "const": "untrusted_external"
+    }
+  }
+}

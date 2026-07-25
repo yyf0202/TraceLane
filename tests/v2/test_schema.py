@@ -6,6 +6,13 @@ from datetime import UTC, datetime
 import pytest
 
 from tracelane.acquisition.contracts import EvidenceCandidate, compute_candidate_id
+from tracelane.evidence_registry.contracts import (
+    EvidenceImportMetadata,
+    EvidenceImportRow,
+    EvidenceProject,
+    EvidenceTransformation,
+    ProjectEvidenceCandidate,
+)
 from tracelane.v2.contracts import ArtifactRef
 from tracelane.v2.schema import SchemaValidationError, validate_document
 
@@ -208,3 +215,177 @@ def test_evidence_manifest_schema_rejects_malformed_transformation_ref(
 
     with pytest.raises(SchemaValidationError):
         validate_document("evidence-manifest", evidence_manifest_value(malformed))
+
+
+def registry_blob_ref(*, digest: str = "a" * 64) -> ArtifactRef:
+    return ArtifactRef.from_dict(
+        {
+            "kind": "evidence_blob",
+            "uri": f"tracelane://evidence/blobs/sha256/{digest}",
+            "media_type": "text/plain",
+            "sha256": digest,
+            "size_bytes": 12,
+        }
+    )
+
+
+def registry_candidate_value() -> dict[str, object]:
+    content_ref = registry_blob_ref()
+    candidate_id = compute_candidate_id(
+        query="query",
+        title="title",
+        source_url="https://history.example/source",
+        document_date="1812-05",
+        date_precision="month",
+        content_sha256=content_ref.sha256,
+    )
+    return ProjectEvidenceCandidate.create(
+        project_id="hist-001",
+        candidate_id=candidate_id,
+        source_spec_id="hist001_source",
+        query="query",
+        title="title",
+        source_url="https://history.example/source",
+        document_date="1812-05",
+        date_precision="month",
+        retrieved_at=datetime(2026, 7, 24, tzinfo=UTC),
+        curator="curator",
+        source_type="primary",
+        role="evidence",
+        domains=("diplomacy",),
+        fact_ids=("diplomacy.fact",),
+        content_ref=content_ref,
+        transformation_refs=(),
+        content_authorship="repository_authored",
+        retention_policy="paraphrase_only",
+        license_basis="Public Domain",
+        acquisition_session_id="acq_hist001_20260724",
+        source_candidate_uri="tracelane://artifacts/candidates/source.json",
+        source_candidate_id=candidate_id,
+        source_candidate_record_sha256="b" * 64,
+        source_candidate_content_sha256=content_ref.sha256,
+    ).to_dict()
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("source_type", "tertiary"),
+        ("role", "control"),
+        ("content_authorship", "unknown"),
+        ("retention_policy", "full_text"),
+        ("record_sha256", "A" * 64),
+    ],
+)
+def test_project_candidate_schema_covers_enums_and_digest_pattern(
+    field: str, replacement: str
+) -> None:
+    value = registry_candidate_value()
+    value[field] = replacement
+
+    with pytest.raises(SchemaValidationError):
+        validate_document("project-evidence-candidate", value)
+
+
+def test_project_schema_covers_status_source_types_and_duplicate_arrays() -> None:
+    project = EvidenceProject.create(
+        project_id="hist-001",
+        title="title",
+        research_question="question",
+        historical_cutoff_at=datetime(1812, 6, 23, 23, 59, 59, tzinfo=UTC),
+        intervention="intervention",
+        required_domains=("diplomacy",),
+        admitted_source_types=("primary",),
+        status="active",
+    ).to_dict()
+    for field, replacement in (
+        ("status", "retired"),
+        ("admitted_source_types", ["tertiary"]),
+        ("required_domains", ["diplomacy", "diplomacy"]),
+    ):
+        invalid = dict(project)
+        invalid[field] = replacement
+        with pytest.raises(SchemaValidationError):
+            validate_document("evidence-project", invalid)
+
+
+def test_transformation_and_metadata_schemas_cover_typed_refs_and_rows() -> None:
+    candidate = registry_candidate_value()
+    transformation = EvidenceTransformation.create(
+        project_id="hist-001",
+        candidate_id=str(candidate["candidate_id"]),
+        transformation_type="ocr",
+        input_ref=registry_blob_ref(),
+        output_ref=registry_blob_ref(digest="c" * 64),
+        actor="operator",
+        method="OCR",
+        parameters={"options": [True, None, 1]},
+        created_at=datetime(2026, 7, 24, tzinfo=UTC),
+        license_implications="None.",
+    ).to_dict()
+    transformation["input_ref"] = artifact_ref_value(kind="evidence_transformation")
+    with pytest.raises(SchemaValidationError):
+        validate_document("evidence-transformation", transformation)
+
+    parsed_candidate = ProjectEvidenceCandidate.from_dict(candidate)
+    metadata = EvidenceImportMetadata.create(
+        project_id="hist-001",
+        session_id="acq_hist001_20260724",
+        manifest_sha256="d" * 64,
+        candidates=(EvidenceImportRow.from_candidate(parsed_candidate),),
+    ).to_dict()
+    metadata["candidates"] = [metadata["candidates"][0], metadata["candidates"][0]]
+    with pytest.raises(SchemaValidationError):
+        validate_document("evidence-import-metadata", metadata)
+
+
+@pytest.mark.parametrize(
+    "schema_name",
+    [
+        "evidence-project",
+        "project-evidence-candidate",
+        "evidence-transformation",
+        "evidence-import-metadata",
+    ],
+)
+def test_evidence_registry_schemas_reject_missing_required_and_unknown_fields(
+    schema_name: str,
+) -> None:
+    values: dict[str, dict[str, object]] = {
+        "evidence-project": EvidenceProject.create(
+            project_id="hist-001",
+            title="title",
+            research_question="question",
+            historical_cutoff_at=datetime(1812, 6, 23, 23, 59, 59, tzinfo=UTC),
+            intervention="intervention",
+            required_domains=("diplomacy",),
+            admitted_source_types=("primary",),
+            status="active",
+        ).to_dict(),
+        "project-evidence-candidate": registry_candidate_value(),
+        "evidence-transformation": EvidenceTransformation.create(
+            project_id="hist-001",
+            candidate_id=str(registry_candidate_value()["candidate_id"]),
+            transformation_type="normalization",
+            input_ref=registry_blob_ref(),
+            output_ref=registry_blob_ref(digest="e" * 64),
+            actor="operator",
+            method="normalization",
+            parameters={},
+            created_at=datetime(2026, 7, 24, tzinfo=UTC),
+            license_implications="None.",
+        ).to_dict(),
+        "evidence-import-metadata": EvidenceImportMetadata.create(
+            project_id="hist-001",
+            session_id="acq_hist001_20260724",
+            manifest_sha256="f" * 64,
+            candidates=(EvidenceImportRow.from_candidate(ProjectEvidenceCandidate.from_dict(registry_candidate_value())),),
+        ).to_dict(),
+    }
+    value = values[schema_name]
+    missing = dict(value)
+    missing.pop("schema_id")
+    with pytest.raises(SchemaValidationError):
+        validate_document(schema_name, missing)
+    with pytest.raises(SchemaValidationError):
+        validate_document(schema_name, value | {"unexpected": True})
