@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
@@ -25,11 +26,17 @@ from tracelane.evidence_registry.contracts import (
 from tracelane.evidence_registry.index import (
     EvidenceProjectIndex,
     EvidenceRegistry,
-    build_project_index,
-    build_registry,
     rebuild_project_index,
     rebuild_registry,
-    verify_evidence_registry,
+)
+from tracelane.evidence_registry.index import (
+    _build_project_index as build_project_index,
+)
+from tracelane.evidence_registry.index import (
+    _build_registry as build_registry,
+)
+from tracelane.evidence_registry.index import (
+    _verify_evidence_registry as verify_evidence_registry,
 )
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
@@ -41,7 +48,7 @@ from tracelane.evidence_registry.storage import (
     rollback_json_replacement,
     write_json_create_or_match,
 )
-from tracelane.security import classify_and_redact
+from tracelane.security import assert_safe_tree, classify_and_redact
 from tracelane.v2.contracts import ArtifactRef, content_digest
 from tracelane.v2.schema import validate_document
 from tracelane.v2.storage import ArtifactRoot, secure_read_bytes
@@ -88,6 +95,13 @@ class _AuthenticatedImport:
     manifest_sha256: str
     closures: tuple[AcquisitionCandidateClosure, ...]
     rows: tuple[EvidenceImportRow, ...]
+
+
+@dataclass(frozen=True)
+class _ProjectDirectoryPublicationReceipt:
+    target: Path
+    directory_identity: tuple[int, int]
+    tree_snapshot: tuple[tuple[object, ...], ...]
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -495,7 +509,47 @@ def _publish_registry(root: EvidenceRoot) -> JsonReplacementReceipt:
     return receipt
 
 
-def _publish_project_directory_no_replace(source: Path, target: Path) -> None:
+def _project_directory_snapshot(path: Path) -> tuple[tuple[object, ...], ...]:
+    path = Path(path)
+    try:
+        assert_safe_tree(path)
+        entries: list[tuple[object, ...]] = []
+        for current in (path, *sorted(path.rglob("*"))):
+            metadata = current.lstat()
+            relative = current.relative_to(path).as_posix() or "."
+            if stat.S_ISDIR(metadata.st_mode):
+                entries.append(
+                    (
+                        relative,
+                        "directory",
+                        metadata.st_dev,
+                        metadata.st_ino,
+                    )
+                )
+                continue
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise ValueError("project publication tree is invalid")
+            data = secure_read_bytes(
+                current,
+                root=path,
+                label="evidence import project publication",
+            )
+            entries.append(
+                (
+                    relative,
+                    "file",
+                    metadata.st_dev,
+                    metadata.st_ino,
+                    len(data),
+                    hashlib.sha256(data).hexdigest(),
+                )
+            )
+        return tuple(entries)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("project publication tree is invalid") from exc
+
+
+def _move_project_directory_no_replace(source: Path, target: Path) -> None:
     source = Path(source)
     target = Path(target)
     if os.name == "nt":
@@ -563,6 +617,65 @@ def _publish_project_directory_no_replace(source: Path, target: Path) -> None:
     raise OSError(errno.ENOTSUP, "atomic no-replace directory publication is unavailable")
 
 
+def _publish_project_directory_no_replace(
+    source: Path,
+    target: Path,
+) -> _ProjectDirectoryPublicationReceipt:
+    source = Path(source)
+    target = Path(target)
+    source_snapshot = _project_directory_snapshot(source)
+    root_entry = source_snapshot[0]
+    source_identity = int(root_entry[2]), int(root_entry[3])
+    _move_project_directory_no_replace(source, target)
+    receipt = _ProjectDirectoryPublicationReceipt(
+        target=target,
+        directory_identity=source_identity,
+        tree_snapshot=source_snapshot,
+    )
+    try:
+        if _project_directory_snapshot(target) != source_snapshot:
+            raise ValueError("project publication tree changed")
+    except (OSError, TypeError, ValueError):
+        try:
+            _rollback_project_directory_publication(receipt)
+        except (OSError, TypeError, ValueError):
+            raise ValueError("project directory publication rollback failed") from None
+        raise ValueError("project directory publication changed") from None
+    return receipt
+
+
+def _rollback_project_directory_publication(
+    receipt: _ProjectDirectoryPublicationReceipt,
+) -> None:
+    if not isinstance(receipt, _ProjectDirectoryPublicationReceipt):
+        raise ValueError("project publication receipt is invalid")
+    target = receipt.target
+    try:
+        current_snapshot = _project_directory_snapshot(target)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("project publication rollback target changed") from exc
+    if (
+        not current_snapshot
+        or current_snapshot[0][2:] != receipt.directory_identity
+        or current_snapshot != receipt.tree_snapshot
+    ):
+        raise ValueError("project publication rollback target changed")
+    tombstone = target.parent / f".evidence-project-rollback-{uuid.uuid4().hex}"
+    try:
+        _move_project_directory_no_replace(target, tombstone)
+        if _project_directory_snapshot(tombstone) != receipt.tree_snapshot:
+            try:
+                _move_project_directory_no_replace(tombstone, target)
+            except (OSError, TypeError, ValueError):
+                raise ValueError("project publication rollback restore failed") from None
+            raise ValueError("project publication rollback target changed")
+        shutil.rmtree(tombstone)
+        if target.exists() or target.is_symlink() or tombstone.exists() or tombstone.is_symlink():
+            raise ValueError("project publication rollback failed")
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("project publication rollback failed") from exc
+
+
 def _import_acquisition_project(
     source_root: str | Path,
     target_root: str | Path,
@@ -575,69 +688,71 @@ def _import_acquisition_project(
     if _paths_overlap(source_path, target_path):
         raise ValueError("acquisition import source and target overlap")
     service, authenticated = _authenticate_source(source_path, metadata)
-    with evidence_root_mutation_lock(target_path):
-        staging_namespace, stage_path = _staging_location(target_path)
-        committed_report: EvidenceImportReport | None = None
-        try:
-            stage, expected_index = _build_staged_project(
-                stage_path,
-                project,
-                authenticated,
-                metadata.session_id,
-            )
-            _assert_source_unchanged(
-                service,
-                source_path,
-                authenticated,
-                metadata.session_id,
-            )
-
-            target, project_exists = _preflight_existing_target(
-                target_path,
-                project,
-                expected_index,
-            )
+    committed_report: EvidenceImportReport | None = None
+    try:
+        with evidence_root_mutation_lock(target_path):
+            staging_namespace, stage_path = _staging_location(target_path)
+            project_receipt: _ProjectDirectoryPublicationReceipt | None = None
+            registry_receipt: JsonReplacementReceipt | None = None
             try:
-                target = target or EvidenceRoot.create(target_path)
-                target_blobs = EvidenceBlobStore(target)
-                for closure in authenticated.closures:
-                    target_blobs.put_bytes(
-                        closure.content_bytes,
-                        closure.candidate.content_ref.media_type,
-                        "evidence_blob",
-                    )
-            except (OSError, TypeError, ValueError) as exc:
-                raise ValueError("evidence import target conflicts") from exc
+                stage, expected_index = _build_staged_project(
+                    stage_path,
+                    project,
+                    authenticated,
+                    metadata.session_id,
+                )
+                _assert_source_unchanged(
+                    service,
+                    source_path,
+                    authenticated,
+                    metadata.session_id,
+                )
 
-            final_project = target.path / "projects" / project.project_id
-            target.ensure_parent(final_project)
-            _assert_source_unchanged(
-                service,
-                source_path,
-                authenticated,
-                metadata.session_id,
-            )
-            if project_exists:
-                _authenticate_existing_project(
-                    target,
+                target, project_exists = _preflight_existing_target(
+                    target_path,
                     project,
                     expected_index,
                 )
-            else:
                 try:
-                    _publish_project_directory_no_replace(
-                        stage.path / "projects" / project.project_id,
-                        final_project,
-                    )
-                except OSError:
-                    raise ValueError("evidence import target changed") from None
-                _authenticate_existing_project(
-                    target,
-                    project,
-                    expected_index,
+                    target = target or EvidenceRoot.create(target_path)
+                    target_blobs = EvidenceBlobStore(target)
+                    for closure in authenticated.closures:
+                        target_blobs.put_bytes(
+                            closure.content_bytes,
+                            closure.candidate.content_ref.media_type,
+                            "evidence_blob",
+                        )
+                except (OSError, TypeError, ValueError) as exc:
+                    raise ValueError("evidence import target conflicts") from exc
+
+                final_project = target.path / "projects" / project.project_id
+                target.ensure_parent(final_project)
+                _assert_source_unchanged(
+                    service,
+                    source_path,
+                    authenticated,
+                    metadata.session_id,
                 )
-            registry_receipt = _publish_registry(target)
-            try:
+                if project_exists:
+                    _authenticate_existing_project(
+                        target,
+                        project,
+                        expected_index,
+                    )
+                else:
+                    try:
+                        project_receipt = _publish_project_directory_no_replace(
+                            stage.path / "projects" / project.project_id,
+                            final_project,
+                        )
+                    except OSError:
+                        raise ValueError("evidence import target changed") from None
+                    _authenticate_existing_project(
+                        target,
+                        project,
+                        expected_index,
+                    )
+                registry_receipt = _publish_registry(target)
                 verified = verify_evidence_registry(target, project.project_id)
                 if verified.project_index_sha256 is None:
                     raise ValueError("evidence import target is invalid")
@@ -655,26 +770,43 @@ def _import_acquisition_project(
                         item.candidate.candidate_id for item in authenticated.closures
                     ),
                 )
-            except (OSError, TypeError, ValueError):
-                try:
-                    rollback_json_replacement(target, registry_receipt)
-                except (OSError, TypeError, ValueError):
-                    raise ValueError("evidence import target is invalid") from None
+            except BaseException:
+                if committed_report is None:
+                    rollback_failed = False
+                    if registry_receipt is not None:
+                        try:
+                            rollback_json_replacement(target, registry_receipt)
+                        except (OSError, TypeError, ValueError):
+                            rollback_failed = True
+                    if project_receipt is not None:
+                        try:
+                            _rollback_project_directory_publication(project_receipt)
+                        except (OSError, TypeError, ValueError):
+                            rollback_failed = True
+                    if rollback_failed:
+                        raise ValueError("evidence import target is invalid") from None
                 raise
+            finally:
+                if stage_path.exists() or stage_path.is_symlink():
+                    try:
+                        _safe_remove_stage(
+                            stage_path,
+                            staging_namespace,
+                            target_path,
+                        )
+                    except ValueError:
+                        if committed_report is None:
+                            raise
+            if registry_receipt is None:
+                raise ValueError("evidence import target is invalid")
             with suppress(OSError, TypeError, ValueError):
                 commit_json_replacement(registry_receipt)
-            return committed_report
-        finally:
-            if stage_path.exists() or stage_path.is_symlink():
-                try:
-                    _safe_remove_stage(
-                        stage_path,
-                        staging_namespace,
-                        target_path,
-                    )
-                except ValueError:
-                    if committed_report is None:
-                        raise
+    except (OSError, TypeError, ValueError):
+        if committed_report is None:
+            raise
+    if committed_report is None:
+        raise ValueError("evidence import target is invalid")
+    return committed_report
 
 
 def import_acquisition_project(

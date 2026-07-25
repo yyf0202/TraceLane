@@ -1106,8 +1106,10 @@ def build_project_index(
     root: EvidenceRoot | str | Path,
     project_id: str,
 ) -> EvidenceProjectIndex:
+    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
     try:
-        return _build_project_index(root, project_id)
+        with evidence_root_mutation_lock(root_path):
+            return _build_project_index(root_path, project_id)
     except ValueError as exc:
         raise ValueError(str(exc)) from None
     except (OSError, TypeError):
@@ -1129,8 +1131,10 @@ def _build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
 
 
 def build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
+    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
     try:
-        return _build_registry(root)
+        with evidence_root_mutation_lock(root_path):
+            return _build_registry(root_path)
     except ValueError as exc:
         raise ValueError(str(exc)) from None
     except (OSError, TypeError):
@@ -1138,32 +1142,7 @@ def build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
 
 
 def _rebuild_registry(root: EvidenceRoot | str | Path) -> ArtifactRef:
-    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
-    with evidence_root_mutation_lock(root_path):
-        authenticated_root = _as_root(root_path)
-        initial = _derive_registry_once(authenticated_root)
-        final = _reauthenticate_registry_state(authenticated_root, initial)
-        receipt: JsonReplacementReceipt | None = None
-        try:
-            receipt = _publish_derived_json(
-                authenticated_root,
-                "tracelane://evidence/registry.json",
-                "evidence_registry",
-                _REGISTRY_SCHEMA,
-                final[0].to_dict(),
-            )
-            _reauthenticate_registry_state(authenticated_root, initial)
-            _read_registry(authenticated_root, final[0])
-        except (OSError, TypeError, ValueError):
-            if receipt is not None:
-                try:
-                    rollback_json_replacement(authenticated_root, receipt)
-                except (OSError, TypeError, ValueError):
-                    raise ValueError("evidence registry rollback failed") from None
-            raise ValueError("evidence registry publication failed") from None
-        with suppress(OSError, TypeError, ValueError):
-            commit_json_replacement(receipt)
-        return receipt.reference
+    return _rebuild_all_evidence_indexes(root, None)[1]
 
 
 def rebuild_registry(root: EvidenceRoot | str | Path) -> ArtifactRef:
@@ -1191,6 +1170,117 @@ def _publish_derived_json(
     )
 
 
+def _source_derived_registry_state(
+    root: EvidenceRoot,
+) -> tuple[
+    EvidenceRegistry,
+    tuple[_ProjectSnapshot, ...],
+    Mapping[str, ArtifactRef],
+]:
+    project_ids = _discover_project_ids(root)
+    files = tuple(_discover_project(root, project_id) for project_id in project_ids)
+    snapshots = tuple(_load_project_snapshot(root, item.project_id, item) for item in files)
+    overrides = {
+        snapshot.project.project_id: _json_reference(
+            _json_uri(snapshot.project.project_id, "index", "index.json"),
+            "evidence_project_index",
+            _PROJECT_INDEX_SCHEMA,
+            snapshot.expected_index.to_dict(),
+        )
+        for snapshot in snapshots
+    }
+    derived = _derive_registry_once(root, overrides)
+    if derived[1] != snapshots:
+        raise ValueError("evidence source snapshot changed")
+    return derived
+
+
+def _rebuild_all_evidence_indexes(
+    root: EvidenceRoot | str | Path,
+    project_id: str | None,
+) -> tuple[Mapping[str, ArtifactRef], ArtifactRef]:
+    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
+    committed_result: tuple[Mapping[str, ArtifactRef], ArtifactRef] | None = None
+    try:
+        with evidence_root_mutation_lock(root_path):
+            authenticated_root = _as_root(root_path)
+            initial_registry = _source_derived_registry_state(authenticated_root)
+            index_refs = initial_registry[2]
+            if project_id is not None and project_id not in index_refs:
+                raise ValueError("evidence rebuild request is invalid")
+            final_registry = _reauthenticate_registry_state(
+                authenticated_root,
+                initial_registry,
+                index_refs,
+            )
+            registry_ref = _json_reference(
+                "tracelane://evidence/registry.json",
+                "evidence_registry",
+                _REGISTRY_SCHEMA,
+                final_registry[0].to_dict(),
+            )
+
+            receipts: list[JsonReplacementReceipt] = []
+            try:
+                for snapshot in final_registry[1]:
+                    current_project_id = snapshot.project.project_id
+                    index_uri = _json_uri(current_project_id, "index", "index.json")
+                    published_index = _publish_derived_json(
+                        authenticated_root,
+                        index_uri,
+                        "evidence_project_index",
+                        _PROJECT_INDEX_SCHEMA,
+                        snapshot.expected_index.to_dict(),
+                    )
+                    if published_index.reference != index_refs[current_project_id]:
+                        raise ValueError("project index publication changed")
+                    receipts.append(published_index)
+                _reauthenticate_registry_state(
+                    authenticated_root,
+                    initial_registry,
+                    index_refs,
+                )
+                published_registry = _publish_derived_json(
+                    authenticated_root,
+                    "tracelane://evidence/registry.json",
+                    "evidence_registry",
+                    _REGISTRY_SCHEMA,
+                    final_registry[0].to_dict(),
+                )
+                if published_registry.reference != registry_ref:
+                    raise ValueError("evidence registry publication changed")
+                receipts.append(published_registry)
+                verified = _verify_evidence_registry(
+                    authenticated_root,
+                    project_id,
+                )
+                if verified.registry_sha256 != registry_ref.sha256 or (
+                    project_id is not None
+                    and verified.project_index_sha256 != index_refs[project_id].sha256
+                ):
+                    raise ValueError("evidence derived verification changed")
+            except (OSError, TypeError, ValueError):
+                rollback_failed = False
+                for receipt in reversed(receipts):
+                    try:
+                        rollback_json_replacement(authenticated_root, receipt)
+                    except (OSError, TypeError, ValueError):
+                        rollback_failed = True
+                if rollback_failed:
+                    raise ValueError("evidence derived rollback failed") from None
+                raise ValueError("evidence derived publication failed") from None
+            for receipt in receipts:
+                with suppress(OSError, TypeError, ValueError):
+                    commit_json_replacement(receipt)
+            committed_result = index_refs, registry_ref
+    except (OSError, TypeError, ValueError):
+        if committed_result is None:
+            raise
+    if committed_result is None:
+        raise ValueError("evidence derived publication failed")
+    return committed_result
+
+
 def _rebuild_evidence_indexes(
     root: EvidenceRoot | str | Path,
     project_id: str,
@@ -1199,101 +1289,8 @@ def _rebuild_evidence_indexes(
         _require_project_id(project_id)
     except ValueError as exc:
         raise ValueError("evidence rebuild request is invalid") from exc
-    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
-    with evidence_root_mutation_lock(root_path):
-        authenticated_root = _as_root(root_path)
-        index_uri = _json_uri(project_id, "index", "index.json")
-        registry_uri = "tracelane://evidence/registry.json"
-        initial_project = _load_project_snapshot(
-            authenticated_root,
-            project_id,
-        )
-        final_project = _reauthenticate_project_snapshot(
-            authenticated_root,
-            initial_project,
-        )
-        index_ref = _json_reference(
-            index_uri,
-            "evidence_project_index",
-            _PROJECT_INDEX_SCHEMA,
-            final_project.expected_index.to_dict(),
-        )
-        overrides = {project_id: index_ref}
-        initial_registry = _derive_registry_once(
-            authenticated_root,
-            overrides,
-        )
-        final_registry = _reauthenticate_registry_state(
-            authenticated_root,
-            initial_registry,
-            overrides,
-        )
-        registry_ref = _json_reference(
-            registry_uri,
-            "evidence_registry",
-            _REGISTRY_SCHEMA,
-            final_registry[0].to_dict(),
-        )
-        _reauthenticate_project_snapshot(
-            authenticated_root,
-            initial_project,
-        )
-        _reauthenticate_registry_state(
-            authenticated_root,
-            initial_registry,
-            overrides,
-        )
-
-        receipts: list[JsonReplacementReceipt] = []
-        try:
-            published_index = _publish_derived_json(
-                authenticated_root,
-                index_uri,
-                "evidence_project_index",
-                _PROJECT_INDEX_SCHEMA,
-                final_project.expected_index.to_dict(),
-            )
-            if published_index.reference != index_ref:
-                raise ValueError("project index publication changed")
-            receipts.append(published_index)
-            _reauthenticate_registry_state(
-                authenticated_root,
-                initial_registry,
-                overrides,
-            )
-            published_registry = _publish_derived_json(
-                authenticated_root,
-                registry_uri,
-                "evidence_registry",
-                _REGISTRY_SCHEMA,
-                final_registry[0].to_dict(),
-            )
-            if published_registry.reference != registry_ref:
-                raise ValueError("evidence registry publication changed")
-            receipts.append(published_registry)
-            verified = verify_evidence_registry(
-                authenticated_root,
-                project_id,
-            )
-            if (
-                verified.project_index_sha256 != index_ref.sha256
-                or verified.registry_sha256 != registry_ref.sha256
-            ):
-                raise ValueError("evidence derived verification changed")
-        except (OSError, TypeError, ValueError):
-            rollback_failed = False
-            for receipt in reversed(receipts):
-                try:
-                    rollback_json_replacement(authenticated_root, receipt)
-                except (OSError, TypeError, ValueError):
-                    rollback_failed = True
-            if rollback_failed:
-                raise ValueError("evidence derived rollback failed") from None
-            raise ValueError("evidence derived publication failed") from None
-        for receipt in receipts:
-            with suppress(OSError, TypeError, ValueError):
-                commit_json_replacement(receipt)
-        return index_ref, registry_ref
+    index_refs, registry_ref = _rebuild_all_evidence_indexes(root, project_id)
+    return index_refs[project_id], registry_ref
 
 
 def rebuild_evidence_indexes(
@@ -1386,8 +1383,10 @@ def verify_evidence_registry(
     root: EvidenceRoot | str | Path,
     project_id: str | None = None,
 ) -> VerificationReport:
+    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
     try:
-        return _verify_evidence_registry(root, project_id)
+        with evidence_root_mutation_lock(root_path):
+            return _verify_evidence_registry(root_path, project_id)
     except ValueError as exc:
         raise ValueError(str(exc)) from None
     except (OSError, TypeError):
@@ -1486,8 +1485,10 @@ def find_evidence(
     root: EvidenceRoot | str | Path,
     query: EvidenceQuery,
 ) -> tuple[EvidenceIndexEntry, ...]:
+    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
     try:
-        return _find_evidence(root, query)
+        with evidence_root_mutation_lock(root_path):
+            return _find_evidence(root_path, query)
     except ValueError as exc:
         raise ValueError(str(exc)) from None
     except (OSError, TypeError):

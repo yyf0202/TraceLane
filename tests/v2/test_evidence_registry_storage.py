@@ -186,6 +186,37 @@ def test_create_only_creates_the_exact_root(tmp_path: Path) -> None:
     assert not missing_parent.parent.exists()
 
 
+@pytest.mark.parametrize("failure", ["ancestor", "creation"])
+def test_create_failure_has_sanitized_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    sensitive_path = tmp_path / "private-create-path"
+    if failure == "ancestor":
+        target = sensitive_path / "missing-parent" / "evidence"
+    else:
+        sensitive_path.mkdir()
+        target = sensitive_path / "evidence"
+
+        def fail_creation(*args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise OSError(13, "creation denied", str(target))
+
+        monkeypatch.setattr(
+            evidence_storage,
+            "_secure_ensure_directory_chain",
+            fail_creation,
+        )
+
+    with pytest.raises(ValueError, match="^evidence root") as captured:
+        EvidenceRoot.create(target)
+
+    rendered = "".join(traceback.format_exception(captured.type, captured.value, captured.tb))
+    assert captured.value.__cause__ is None
+    assert str(tmp_path) not in rendered
+
+
 def test_create_and_open_are_idempotent_for_an_existing_safe_root(tmp_path: Path) -> None:
     root_path = tmp_path / "evidence"
 

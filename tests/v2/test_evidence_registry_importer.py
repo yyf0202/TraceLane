@@ -13,6 +13,7 @@ import pytest
 from tracelane.acquisition import ManualAcquisitionService
 from tracelane.acquisition import service as acquisition_service
 from tracelane.evidence_registry import importer as evidence_importer
+from tracelane.evidence_registry import storage as evidence_storage
 from tracelane.evidence_registry.contracts import (
     EvidenceImportMetadata,
     EvidenceImportRow,
@@ -24,6 +25,7 @@ from tracelane.evidence_registry.index import (
     verify_evidence_registry,
 )
 from tracelane.security import RedactedPayload
+from tracelane.v2 import locking as v2_locking
 from tracelane.v2.storage import ArtifactRoot, BlobStore
 
 NOW = datetime(2026, 7, 25, tzinfo=UTC)
@@ -430,6 +432,57 @@ def test_import_revalidates_source_after_snapshot_before_publication(
     assert _tree_snapshot(target) == {}
 
 
+def test_import_reauthenticates_source_after_target_blob_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=2)
+    first_candidate = next((source / "acquisition" / SESSION_ID / "candidates").glob("*.json"))
+    candidate_value = json.loads(first_candidate.read_text(encoding="utf-8"))
+    content_path = ArtifactRoot(source).resolve(candidate_value["content_ref"]["uri"])
+    original_put = evidence_importer.EvidenceBlobStore.put_bytes
+    publication_calls = 0
+    mutated = False
+
+    def mutate_after_target_blob(
+        self: object,
+        data: bytes,
+        media_type: str,
+        kind: str,
+    ):
+        nonlocal mutated
+        reference = original_put(self, data, media_type, kind)  # type: ignore[arg-type]
+        if self.root.path == target.resolve() and not mutated:  # type: ignore[attr-defined]
+            mutated = True
+            content_path.write_bytes(b"changed after target blob publication")
+        return reference
+
+    def observe_project_publication(*args: object, **kwargs: object) -> None:
+        nonlocal publication_calls
+        del args, kwargs
+        publication_calls += 1
+        raise AssertionError("project publication followed a stale source snapshot")
+
+    monkeypatch.setattr(
+        evidence_importer.EvidenceBlobStore,
+        "put_bytes",
+        mutate_after_target_blob,
+    )
+    monkeypatch.setattr(
+        evidence_importer,
+        "_publish_project_directory_no_replace",
+        observe_project_publication,
+    )
+
+    with pytest.raises(ValueError, match="^acquisition import source changed$"):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert mutated
+    assert publication_calls == 0
+    assert not (target / "projects" / "hist-001").exists()
+    assert not (target / "registry.json").exists()
+
+
 def test_staged_validation_precedes_project_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -508,12 +561,12 @@ def test_project_validation_precedes_global_registry_publication(
     assert validation_calls == 1
     assert registry_publication_calls == 0
     assert rejected_state
-    assert _tree_snapshot(target) == rejected_state
-    assert (target / "projects" / "hist-001").is_dir()
+    assert _tree_snapshot(target) != rejected_state
+    assert not (target / "projects" / "hist-001").exists()
     assert not (target / "registry.json").exists()
 
 
-def test_import_revalidates_source_after_project_publication_before_registry(
+def test_post_publication_source_mutation_does_not_invalidate_copied_target(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -527,9 +580,10 @@ def test_import_revalidates_source_after_project_publication_before_registry(
     def mutate_after_project_publication(
         source_path: str | Path,
         target_path: str | Path,
-    ) -> None:
-        original_publish(Path(source_path), Path(target_path))
+    ):
+        receipt = original_publish(Path(source_path), Path(target_path))
         content_path.write_bytes(b"changed during project publication")
+        return receipt
 
     monkeypatch.setattr(
         evidence_importer,
@@ -546,7 +600,7 @@ def test_import_revalidates_source_after_project_publication_before_registry(
     assert verify_evidence_registry(target, "hist-001").candidate_count == 2
 
 
-def test_import_revalidates_source_after_target_verification_before_return(
+def test_post_verification_source_mutation_does_not_reverse_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -871,7 +925,7 @@ def test_project_publication_does_not_use_replacing_os_rename(
     assert verify_evidence_registry(target, "hist-001").candidate_count == 1
 
 
-def test_interruption_after_project_publication_repairs_registry_on_rerun(
+def test_interruption_after_project_publication_rolls_back_and_retry_succeeds(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -888,7 +942,7 @@ def test_interruption_after_project_publication_repairs_registry_on_rerun(
     )
     with pytest.raises(RuntimeError, match="injected interruption"):
         import_acquisition_project(source, target, project, metadata)
-    assert (target / "projects" / "hist-001" / "index.json").is_file()
+    assert not (target / "projects" / "hist-001").exists()
     assert not (target / "registry.json").exists()
 
     monkeypatch.setattr(
@@ -987,6 +1041,7 @@ def test_final_verification_failure_precedes_commit_and_rolls_back_registry(
         import_acquisition_project(source, target, project, metadata)
 
     assert commit_calls == 0
+    assert not (target / "projects" / "hist-001").exists()
     assert not (target / "registry.json").exists()
 
     monkeypatch.setattr(
@@ -998,6 +1053,71 @@ def test_final_verification_failure_precedes_commit_and_rolls_back_registry(
     assert report.candidate_count == 1
     assert commit_calls == 1
     assert original_verify(target, "hist-001").candidate_count == 1
+
+
+def test_import_rollback_preserves_competing_project_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_authenticate = evidence_importer._authenticate_existing_project
+    saved_owned = tmp_path / "owned-project"
+    marker = b"competing project replacement\n"
+    replaced = False
+
+    def replace_before_authentication(*args: object, **kwargs: object) -> None:
+        nonlocal replaced
+        root = args[0]
+        final_project = root.path / "projects" / "hist-001"  # type: ignore[attr-defined]
+        if final_project.exists() and not replaced:
+            replaced = True
+            final_project.rename(saved_owned)
+            final_project.mkdir()
+            (final_project / "winner.marker").write_bytes(marker)
+            raise ValueError("competing replacement won")
+        original_authenticate(*args, **kwargs)
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "_authenticate_existing_project",
+        replace_before_authentication,
+    )
+
+    with pytest.raises(ValueError, match="^evidence import target is invalid$"):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert replaced
+    assert (target / "projects" / "hist-001" / "winner.marker").read_bytes() == marker
+    assert not (target / "registry.json").exists()
+
+
+def test_import_exit_only_lock_validation_failure_preserves_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_validate = v2_locking._validate_acquired_lock
+    target_lock_name = (
+        f"evidence-import-{evidence_storage._evidence_root_parent_identity(target.resolve())}.lock"
+    )
+    validations_for_first_lock = 0
+
+    def fail_outer_lock_exit(*args: object, **kwargs: object) -> None:
+        nonlocal validations_for_first_lock
+        path = Path(args[1])
+        original_validate(*args, **kwargs)
+        if path.name == target_lock_name:
+            validations_for_first_lock += 1
+            if validations_for_first_lock == 2:
+                raise ValueError("injected exit-only lock validation failure")
+
+    monkeypatch.setattr(v2_locking, "_validate_acquired_lock", fail_outer_lock_exit)
+
+    report = import_acquisition_project(source, target, project, metadata)
+
+    assert validations_for_first_lock == 2
+    assert report.candidate_count == 1
+    assert verify_evidence_registry(target, "hist-001").candidate_count == 1
 
 
 def test_import_uses_dedicated_ignored_lock_namespace(tmp_path: Path) -> None:

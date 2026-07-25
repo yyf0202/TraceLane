@@ -562,6 +562,15 @@ class EvidenceRoot:
 
     @classmethod
     def create(cls, path: str | Path) -> EvidenceRoot:
+        try:
+            return cls._create(path)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from None
+        except (OSError, TypeError):
+            raise ValueError("evidence root is unavailable") from None
+
+    @classmethod
+    def _create(cls, path: str | Path) -> EvidenceRoot:
         supplied = _absolute(path)
         _validate_existing_ancestors(supplied, include_target=False)
         parent = supplied.parent

@@ -7,6 +7,8 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from scripts import hist001_manifest
 from scripts import import_hist001_evidence as hist001_import
 from scripts import prepare_hist001_candidates as hist001_preparation
@@ -97,6 +99,29 @@ EXPECTED_CANDIDATES = {
         "1807-07-09",
     ),
 }
+
+
+def _blob_media_types() -> dict[Path, str]:
+    values: dict[Path, str] = {}
+    for candidate in _candidate_documents().values():
+        reference = candidate["content_ref"]
+        digest = str(reference["sha256"])
+        path = EVIDENCE_ROOT / "blobs" / "sha256" / digest[:2] / f"{digest}.blob"
+        values[path] = str(reference["media_type"])
+    return values
+
+
+def _path_oracle_text(path: Path, media_type: str | None = None) -> str:
+    data = path.read_bytes()
+    must_be_utf8 = path.suffix.lower() in {".json", ".md", ".markdown"} or (
+        media_type is not None and media_type.startswith("text/")
+    )
+    if must_be_utf8:
+        return data.decode("utf-8")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("latin-1")
 
 
 def _candidate_documents(root: Path = EVIDENCE_ROOT) -> dict[str, dict[str, object]]:
@@ -212,19 +237,29 @@ def test_tracked_evidence_text_has_no_sensitive_or_absolute_local_paths() -> Non
     )
     assert all(classify_and_redact(item).redaction_applied for item in sentinels)
 
+    blob_media_types = _blob_media_types()
     violations: list[str] = []
     for path in sorted(EVIDENCE_ROOT.rglob("*")):
         if not path.is_file():
             continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
+        text = _path_oracle_text(path, blob_media_types.get(path))
         classifier_input = _SHA256_TEXT.sub("[SHA256]", text)
         if classify_and_redact(classifier_input).redaction_applied or ".local/runtime.json" in text:
             violations.append(path.relative_to(REPO_ROOT).as_posix())
 
     assert violations == []
+
+
+def test_path_oracle_requires_utf8_text_and_raw_scans_binary(tmp_path: Path) -> None:
+    invalid = tmp_path / "invalid.blob"
+    invalid.write_bytes(b"\xffE:\\private\\evidence.txt")
+
+    with pytest.raises(UnicodeDecodeError):
+        _path_oracle_text(invalid, "text/plain")
+
+    binary_text = _path_oracle_text(invalid, "application/octet-stream")
+    assert "E:\\private\\evidence.txt" in binary_text
+    assert classify_and_redact(binary_text).redaction_applied
 
 
 def test_hist001_stale_source_rebuild_updates_copy_without_changing_tracked_state(

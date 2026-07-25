@@ -4,14 +4,17 @@ import hashlib
 import json
 import stat
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event, get_ident
 
 import pytest
 
 from tracelane.acquisition.contracts import compute_candidate_id
 from tracelane.contracts import canonical_json
 from tracelane.evidence_registry import index as evidence_index
+from tracelane.evidence_registry import storage as evidence_storage
 from tracelane.evidence_registry.contracts import (
     EvidenceProject,
     EvidenceTransformation,
@@ -36,14 +39,19 @@ from tracelane.evidence_registry.storage import (
     EvidenceRoot,
     write_json_create_or_match,
 )
+from tracelane.v2 import locking as v2_locking
 from tracelane.v2.contracts import ArtifactRef, make_object_id
 from tracelane.v2.schema import validate_document
 
 
-def _write_project(root: EvidenceRoot) -> EvidenceProject:
+def _write_project(
+    root: EvidenceRoot,
+    *,
+    project_id: str = "hist-001",
+) -> EvidenceProject:
     project = EvidenceProject.create(
-        project_id="hist-001",
-        title="HIST-001",
+        project_id=project_id,
+        title=project_id.upper(),
         research_question="What evidence supports the counterfactual?",
         historical_cutoff_at=datetime(1812, 6, 23, 23, 59, 59, tzinfo=UTC),
         intervention="Napoleon does not cross the Niemen.",
@@ -53,7 +61,7 @@ def _write_project(root: EvidenceRoot) -> EvidenceProject:
     )
     write_json_create_or_match(
         root,
-        "tracelane://evidence/projects/hist-001/project.json",
+        f"tracelane://evidence/projects/{project_id}/project.json",
         "evidence_project",
         "tracelane://schemas/evidence-project/v1",
         project.to_dict(),
@@ -67,6 +75,7 @@ def _candidate(
     ordinal: int,
     document_date: str,
     date_precision: str,
+    project_id: str = "hist-001",
     source_type: str = "primary",
     role: str = "evidence",
 ) -> ProjectEvidenceCandidate:
@@ -84,9 +93,9 @@ def _candidate(
         content_sha256=hashlib.sha256(payload).hexdigest(),
     )
     candidate = ProjectEvidenceCandidate.create(
-        project_id="hist-001",
+        project_id=project_id,
         candidate_id=candidate_id,
-        source_spec_id=f"hist001_source_{ordinal}",
+        source_spec_id=f"{project_id.replace('-', '')}_source_{ordinal}",
         query=query,
         title=title,
         source_url=source_url,
@@ -103,7 +112,7 @@ def _candidate(
         content_authorship="repository_authored",
         retention_policy="paraphrase_only",
         license_basis="Repository-authored paraphrase.",
-        acquisition_session_id="acq_hist001_20260725",
+        acquisition_session_id=f"acq_{project_id.replace('-', '')}_20260725",
         source_candidate_uri=f"tracelane://artifacts/candidates/source-{ordinal}.json",
         source_candidate_id=candidate_id,
         source_candidate_record_sha256=f"{ordinal:x}" * 64,
@@ -111,7 +120,7 @@ def _candidate(
     )
     write_json_create_or_match(
         root,
-        (f"tracelane://evidence/projects/hist-001/candidates/{candidate.candidate_id}.json"),
+        (f"tracelane://evidence/projects/{project_id}/candidates/{candidate.candidate_id}.json"),
         "evidence_candidate",
         "tracelane://schemas/project-evidence-candidate/v1",
         candidate.to_dict(),
@@ -349,6 +358,220 @@ def test_rebuild_adds_one_project_and_preserves_existing_project_entry(
         next(item for item in rebuilt.projects if item.project_id == "hist-001") == original_entry
     )
     assert verify_evidence_registry(registry_root).project_count == 2
+
+
+def test_root_wide_rebuild_recovers_two_projects_with_stale_review_state(
+    registry_root: EvidenceRoot,
+) -> None:
+    _write_project(registry_root, project_id="hist-002")
+    second_candidate = _candidate(
+        registry_root,
+        ordinal=6,
+        document_date="1812-04-01",
+        date_precision="day",
+        project_id="hist-002",
+    )
+    rebuild_evidence_indexes(registry_root, "hist-002")
+    first_candidate_path = _candidate_path_for_fact(registry_root, "fact.1")
+    first_candidate = ProjectEvidenceCandidate.from_dict(
+        json.loads(first_candidate_path.read_text(encoding="utf-8"))
+    )
+
+    _review(registry_root, first_candidate, "approved")
+    _review(registry_root, second_candidate, "approved")
+
+    first_ref, registry_ref = rebuild_evidence_indexes(registry_root, "hist-001")
+
+    report = verify_evidence_registry(registry_root)
+    second_matches = find_evidence(
+        registry_root,
+        EvidenceQuery(
+            "hist-002",
+            statuses=("approved",),
+            fact_id="fact.6",
+        ),
+    )
+    second_index = build_project_index(registry_root, "hist-002")
+    persisted_registry = build_registry(registry_root)
+
+    assert first_ref == next(
+        item.index_ref for item in persisted_registry.projects if item.project_id == "hist-001"
+    )
+    assert registry_ref.sha256 == report.registry_sha256
+    assert report.project_count == 2
+    assert report.status_counts["approved"] == 3
+    assert second_index.status_counts["approved"] == 1
+    assert len(second_matches) == 1
+    assert second_matches[0].candidate_id == second_candidate.candidate_id
+
+
+def test_rebuild_exit_only_lock_validation_failure_preserves_success(
+    registry_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_path = _candidate_path_for_fact(registry_root, "fact.1")
+    candidate = ProjectEvidenceCandidate.from_dict(
+        json.loads(candidate_path.read_text(encoding="utf-8"))
+    )
+    _review(registry_root, candidate, "approved")
+    original_validate = v2_locking._validate_acquired_lock
+    target_lock_name = (
+        "evidence-import-"
+        f"{evidence_storage._evidence_root_parent_identity(registry_root.path)}.lock"
+    )
+    validations_for_first_lock = 0
+
+    def fail_outer_lock_exit(*args: object, **kwargs: object) -> None:
+        nonlocal validations_for_first_lock
+        path = Path(args[1])
+        original_validate(*args, **kwargs)
+        if path.name == target_lock_name:
+            validations_for_first_lock += 1
+            if validations_for_first_lock == 2:
+                raise ValueError("injected exit-only lock validation failure")
+
+    monkeypatch.setattr(v2_locking, "_validate_acquired_lock", fail_outer_lock_exit)
+
+    index_ref, registry_ref = rebuild_evidence_indexes(registry_root, "hist-001")
+
+    report = verify_evidence_registry(registry_root, "hist-001")
+    assert validations_for_first_lock >= 2
+    assert report.project_index_sha256 == index_ref.sha256
+    assert report.registry_sha256 == registry_ref.sha256
+
+
+def _run_public_reader(root: EvidenceRoot, reader: str):
+    if reader == "project-build":
+        return build_project_index(root, "hist-001")
+    if reader == "registry-build":
+        return build_registry(root)
+    if reader == "verify":
+        return verify_evidence_registry(root, "hist-001")
+    if reader == "find":
+        return find_evidence(
+            root,
+            EvidenceQuery(
+                "hist-001",
+                statuses=("approved",),
+                fact_id="fact.1",
+            ),
+        )
+    raise AssertionError(f"unknown reader: {reader}")
+
+
+@pytest.mark.parametrize("gap", ["missing-index", "index-registry"])
+@pytest.mark.parametrize(
+    "reader",
+    ["project-build", "registry-build", "verify", "find"],
+)
+def test_public_readers_wait_for_complete_rebuild_generation(
+    registry_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    gap: str,
+    reader: str,
+) -> None:
+    candidate_path = _candidate_path_for_fact(registry_root, "fact.1")
+    candidate = ProjectEvidenceCandidate.from_dict(
+        json.loads(candidate_path.read_text(encoding="utf-8"))
+    )
+    _review(registry_root, candidate, "approved")
+    index_path = registry_root.resolve(
+        "tracelane://evidence/projects/hist-001/index.json",
+        must_exist=True,
+    )
+    gap_entered = Event()
+    release_writer = Event()
+    reader_started = Event()
+    reader_entered_private_boundary = Event()
+    reader_thread_id: list[int] = []
+    private_name = {
+        "project-build": "_build_project_index",
+        "registry-build": "_build_registry",
+        "verify": "_verify_evidence_registry",
+        "find": "_find_evidence",
+    }[reader]
+    original_private = getattr(evidence_index, private_name)
+
+    def observe_private_reader(*args, **kwargs):
+        if reader_thread_id and get_ident() == reader_thread_id[0]:
+            reader_entered_private_boundary.set()
+        return original_private(*args, **kwargs)
+
+    monkeypatch.setattr(evidence_index, private_name, observe_private_reader)
+
+    if gap == "missing-index":
+        original_create = evidence_storage.atomic_create_bytes_with_identity
+
+        def pause_before_replacement_create(
+            target: Path,
+            data: bytes,
+            **kwargs,
+        ):
+            if Path(target) == index_path and not gap_entered.is_set():
+                gap_entered.set()
+                assert release_writer.wait(10)
+            return original_create(target, data, **kwargs)
+
+        monkeypatch.setattr(
+            evidence_storage,
+            "atomic_create_bytes_with_identity",
+            pause_before_replacement_create,
+        )
+    else:
+        original_publish = evidence_index._publish_derived_json
+
+        def pause_after_index_publication(*args, **kwargs):
+            receipt = original_publish(*args, **kwargs)
+            if (
+                args[1] == "tracelane://evidence/projects/hist-001/index.json"
+                and not gap_entered.is_set()
+            ):
+                gap_entered.set()
+                assert release_writer.wait(10)
+            return receipt
+
+        monkeypatch.setattr(
+            evidence_index,
+            "_publish_derived_json",
+            pause_after_index_publication,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        writer = executor.submit(
+            rebuild_evidence_indexes,
+            registry_root,
+            "hist-001",
+        )
+        assert gap_entered.wait(10)
+
+        def read_during_gap():
+            reader_thread_id.append(get_ident())
+            reader_started.set()
+            return _run_public_reader(registry_root, reader)
+
+        public_reader = executor.submit(read_during_gap)
+        try:
+            assert reader_started.wait(10)
+            assert not reader_entered_private_boundary.wait(0.5)
+        finally:
+            release_writer.set()
+        index_ref, registry_ref = writer.result(timeout=10)
+        observed = public_reader.result(timeout=10)
+        assert reader_entered_private_boundary.is_set()
+
+    if reader == "project-build":
+        assert observed.status_counts["approved"] == 2
+    elif reader == "registry-build":
+        assert (
+            next(item.index_ref for item in observed.projects if item.project_id == "hist-001")
+            == index_ref
+        )
+    elif reader == "verify":
+        assert observed.project_index_sha256 == index_ref.sha256
+        assert observed.registry_sha256 == registry_ref.sha256
+    else:
+        assert len(observed) == 1
+        assert observed[0].candidate_id == candidate.candidate_id
 
 
 @pytest.mark.parametrize(
@@ -813,7 +1036,7 @@ def test_registry_corruption_matrix_rejects_without_further_mutation(
     assert _tree_snapshot(registry_root) == corrupt_state
 
 
-def test_public_read_apis_attempt_no_filesystem_mutation(
+def test_public_read_apis_attempt_no_evidence_state_mutation(
     registry_root: EvidenceRoot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -822,11 +1045,9 @@ def test_public_read_apis_attempt_no_filesystem_mutation(
 
     def reject_mutation(*args, **kwargs):
         attempts.append("mutation")
-        raise AssertionError("read API attempted a filesystem mutation")
+        raise AssertionError("read API attempted an evidence-state mutation")
 
     monkeypatch.setattr(evidence_index, "_publish_derived_json", reject_mutation)
-    for name in ("replace", "unlink", "remove", "rmdir", "mkdir"):
-        monkeypatch.setattr(evidence_index.os, name, reject_mutation)
 
     build_project_index(registry_root, "hist-001")
     build_registry(registry_root)

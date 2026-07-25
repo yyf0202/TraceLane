@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import traceback
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +11,8 @@ from pathlib import Path
 import pytest
 
 from tracelane.acquisition.contracts import compute_candidate_id
+from tracelane.evidence_registry import reviews as evidence_reviews
+from tracelane.evidence_registry import storage as evidence_storage
 from tracelane.evidence_registry.contracts import (
     EvidenceProject,
     ProjectEvidenceCandidate,
@@ -26,6 +30,7 @@ from tracelane.evidence_registry.storage import (
     EvidenceRoot,
     write_json_create_or_match,
 )
+from tracelane.v2 import locking as v2_locking
 from tracelane.v2.contracts import ArtifactRef, make_object_id
 from tracelane.v2.schema import SchemaValidationError, validate_document
 
@@ -669,6 +674,62 @@ def test_append_review_is_idempotent_and_uses_exact_uri(
         f"tracelane://evidence/projects/hist-001/reviews/{approved_review.review_id}.json"
     )
     assert root.resolve(first.uri).read_bytes().endswith(b"\n")
+
+
+def test_append_review_lock_failure_has_sanitized_traceback(
+    tmp_path: Path,
+    approved_review: EvidenceReview,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sensitive_path = tmp_path / "private-lock-path"
+
+    @contextmanager
+    def fail_lock(target: str | Path):
+        del target
+        raise OSError(13, "lock denied", str(sensitive_path))
+        yield
+
+    monkeypatch.setattr(
+        evidence_reviews,
+        "evidence_root_mutation_lock",
+        fail_lock,
+    )
+
+    with pytest.raises(ValueError, match="^review append failed$") as caught:
+        append_review(tmp_path / "evidence", approved_review)
+
+    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
+    assert caught.value.__cause__ is None
+    assert str(tmp_path) not in rendered
+
+
+def test_append_review_exit_only_lock_validation_failure_preserves_success(
+    tmp_path: Path,
+    approved_review: EvidenceReview,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _published_candidate_root(tmp_path / "evidence", _candidate())
+    original_validate = v2_locking._validate_acquired_lock
+    target_lock_name = (
+        f"evidence-import-{evidence_storage._evidence_root_parent_identity(root.path)}.lock"
+    )
+    validations_for_first_lock = 0
+
+    def fail_lock_exit(*args: object, **kwargs: object) -> None:
+        nonlocal validations_for_first_lock
+        path = Path(args[1])
+        original_validate(*args, **kwargs)
+        if path.name == target_lock_name:
+            validations_for_first_lock += 1
+            if validations_for_first_lock == 2:
+                raise ValueError("injected exit-only lock validation failure")
+
+    monkeypatch.setattr(v2_locking, "_validate_acquired_lock", fail_lock_exit)
+
+    reference = append_review(root, approved_review)
+
+    assert validations_for_first_lock >= 2
+    assert root.resolve(reference.uri, must_exist=True).is_file()
 
 
 def test_append_review_never_replaces_existing_different_bytes(
