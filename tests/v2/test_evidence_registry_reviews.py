@@ -482,6 +482,65 @@ def test_malformed_sensitive_scope_never_echoes_before_schema_validation(
 
 
 @pytest.mark.parametrize(
+    ("field", "sensitive"),
+    [
+        ("decision", r"C:\private\decision.txt"),
+        ("reviewed_at", ".local/runtime.json"),
+    ],
+)
+def test_sensitive_structural_values_never_reach_echoing_schema_errors(
+    approved_review: EvidenceReview,
+    field: str,
+    sensitive: str,
+) -> None:
+    value = approved_review.to_dict()
+    value[field] = sensitive
+
+    with pytest.raises(ValueError, match="^review contains sensitive text$") as captured:
+        EvidenceReview.from_dict(value)
+
+    assert sensitive not in str(captured.value)
+
+
+def test_sensitive_unknown_key_never_reaches_echoing_schema_error(
+    approved_review: EvidenceReview,
+) -> None:
+    sensitive = r"C:\private\unknown.txt"
+    value = approved_review.to_dict()
+    value[sensitive] = "unexpected"
+
+    with pytest.raises(ValueError, match="^review contains sensitive text$") as captured:
+        EvidenceReview.from_dict(value)
+
+    assert sensitive not in str(captured.value)
+
+
+def test_sensitive_unknown_key_collision_uses_stable_no_echo_error(
+    approved_review: EvidenceReview,
+) -> None:
+    first = r"C:\private\first.txt"
+    second = r"D:\private\second.txt"
+    value = approved_review.to_dict()
+    value[first] = "unexpected"
+    value[second] = "unexpected"
+
+    with pytest.raises(ValueError, match="^review contains sensitive text$") as captured:
+        EvidenceReview.from_dict(value)
+
+    assert first not in str(captured.value)
+    assert second not in str(captured.value)
+
+
+def test_non_mapping_review_root_fails_without_echoing_nested_sensitive_text() -> None:
+    sensitive = r"C:\private\review-root.txt"
+
+    with pytest.raises(ValueError, match="^review record is invalid$") as captured:
+        EvidenceReview.from_dict([sensitive])  # type: ignore[arg-type]
+
+    assert sensitive not in str(captured.value)
+
+
+@pytest.mark.parametrize(
     ("field", "replacement"),
     [
         ("reason", " \t "),

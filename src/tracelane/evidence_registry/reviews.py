@@ -27,6 +27,7 @@ from tracelane.v2.schema import validate_document
 
 _CANDIDATE_ID = re.compile(r"^candidate_[0-9a-f]{24}$")
 _REVIEW_ID = re.compile(r"^review_[0-9a-f]{24}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _DECISIONS = frozenset({"approved", "rejected", "superseded"})
 _RETENTION_POLICIES = frozenset(
     {"paraphrase_only", "public_domain_full_text", "licensed_full_text"}
@@ -46,6 +47,32 @@ def _validated_candidate(
     except (TypeError, ValueError) as exc:
         raise ValueError("candidate record hash is invalid") from exc
     return candidate
+
+
+def _preflight_review(value: Mapping[str, object]) -> None:
+    try:
+        _validate_persisted_json(value, "review")
+        return
+    except (TypeError, ValueError):
+        preflight = dict(value)
+        replaced = False
+        for field, pattern in (
+            ("record_sha256", _SHA256),
+            ("candidate_record_sha256", _SHA256),
+            ("review_id", _REVIEW_ID),
+            ("candidate_id", _CANDIDATE_ID),
+            ("supersedes_review_id", _REVIEW_ID),
+        ):
+            item = preflight.get(field)
+            if isinstance(item, str) and pattern.fullmatch(item) is not None:
+                preflight[field] = "derived-identifier"
+                replaced = True
+        if not replaced:
+            raise ValueError("review contains sensitive text") from None
+    try:
+        _validate_persisted_json(preflight, "review")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("review contains sensitive text") from exc
 
 
 def _review_identity(value: Mapping[str, object]) -> dict[str, object]:
@@ -155,16 +182,9 @@ class EvidenceReview:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, object]) -> EvidenceReview:
-        if isinstance(value, Mapping):
-            for field in (
-                "reason",
-                "reviewer",
-                "license_basis",
-                "approved_fact_ids",
-                "approved_domains",
-            ):
-                if field in value:
-                    _validate_persisted_json(value[field], field)
+        if not isinstance(value, Mapping):
+            raise ValueError("review record is invalid")
+        _preflight_review(value)
         validate_document("evidence-review", value)
         review = cls(
             schema_id=str(value["schema_id"]),
