@@ -1,29 +1,45 @@
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from tracelane.acquisition import EvidenceCandidate, ManualAcquisitionService
+from tracelane.contracts import canonical_json
+from tracelane.evidence_registry import EvidenceImportMetadata, EvidenceImportRow
 from tracelane.security import classify_and_redact
+from tracelane.v2.contracts import content_digest
+from tracelane.v2.schema import validate_document
+from tracelane.v2.storage import atomic_write_bytes, secure_read_bytes
 
 
 @dataclass(frozen=True)
 class CandidateSpec:
+    source_spec_id: str
     query: str
     title: str
     source_url: str
     document_date: str
     source_type: str
     license_basis: str
+    domains: tuple[str, ...]
     fact_ids: tuple[str, ...]
     note: str
+    role: str = "evidence"
+
+
+@dataclass(frozen=True)
+class PreparationResult:
+    review_path: Path
+    metadata_path: Path
 
 
 SPECS = (
     CandidateSpec(
+        source_spec_id="hist001_tilsit_treaty",
         query='"Treaty of Tilsit" 1807 full text public domain',
         title="Treaty of Tilsit, 9 July 1807",
         source_url=("https://en.wikisource.org/wiki/Treaty_of_Tilsit%2C_9_July_1807"),
@@ -33,6 +49,7 @@ SPECS = (
             "Repository-authored paraphrase of a public-domain treaty and "
             "public-domain contemporary translation."
         ),
+        domains=("diplomacy", "economy"),
         fact_ids=(
             "diplomacy.tilsit_settlement",
             "diplomacy.duchy_of_warsaw",
@@ -49,6 +66,7 @@ SPECS = (
         ),
     ),
     CandidateSpec(
+        source_spec_id="hist001_continental_system_decrees",
         query='"Berlin Decree" "Milan Decree" full text public domain',
         title="Documents upon the Continental System: Berlin and Milan Decrees",
         source_url=(
@@ -60,6 +78,7 @@ SPECS = (
             "Repository-authored paraphrase of public-domain decrees; the "
             "source identifies the historical editions and translations."
         ),
+        domains=("economy", "imperial-governance"),
         fact_ids=(
             "economy.continental_system_scope",
             "economy.neutral_shipping_exposure",
@@ -77,6 +96,7 @@ SPECS = (
         ),
     ),
     CandidateSpec(
+        source_spec_id="hist001_russian_trade_1811",
         query="Russia tariff decree 1810 continental system primary source",
         title="Russian arrangements for foreign trade in 1811",
         source_url="https://www.prlib.ru/item/330801?mode=rusmarc",
@@ -87,6 +107,7 @@ SPECS = (
             "catalogue record for an 1810 State Council file; no archive image "
             "or modern anthology text is redistributed."
         ),
+        domains=("diplomacy", "economy"),
         fact_ids=(
             "economy.russian_trade_rules_1811",
             "diplomacy.franco_russian_trade_friction",
@@ -103,6 +124,7 @@ SPECS = (
         ),
     ),
     CandidateSpec(
+        source_spec_id="hist001_napoleon_supply_correspondence",
         query=("Napoleon correspondence supplies magazines 1812 before June full text"),
         title="Napoleon's pre-campaign correspondence on supplies, March 1812",
         source_url=(
@@ -117,6 +139,7 @@ SPECS = (
             "correspondence; the modern page is used only as an archive locator "
             "and letter-number reference."
         ),
+        domains=("logistics", "military"),
         fact_ids=(
             "logistics.prewar_supply_plan",
             "military.niemen_consumption_boundary",
@@ -132,6 +155,7 @@ SPECS = (
         ),
     ),
     CandidateSpec(
+        source_spec_id="hist001_wellington_iberia_dispatch",
         query="Wellington dispatch Peninsular War 1811 full text",
         title="Wellington to Liverpool, Villa Fermosa, 7 May 1811",
         source_url="https://www.wtj.com/archives/wellington/1811_05b.htm",
@@ -141,6 +165,7 @@ SPECS = (
             "Repository-authored paraphrase of a public-domain dispatch; no "
             "substantial verbatim text is redistributed."
         ),
+        domains=("iberia",),
         fact_ids=(
             "iberia.allied_force_commitment",
             "iberia.portuguese_finance_and_supply",
@@ -156,6 +181,7 @@ SPECS = (
         ),
     ),
     CandidateSpec(
+        source_spec_id="hist001_french_conscription_1811",
         query=("French conscription allied contingents decree 1811 1812 primary source"),
         title="Council of State recommendation on the 1811 conscription",
         source_url=(
@@ -167,6 +193,7 @@ SPECS = (
         license_basis=(
             "Repository-authored paraphrase of a public-domain proposed decree and tables."
         ),
+        domains=("imperial-governance", "military"),
         fact_ids=(
             "military.conscription_scale_1811",
             "imperial_governance.reserve_and_department_allocation",
@@ -182,6 +209,7 @@ SPECS = (
         ),
     ),
     CandidateSpec(
+        source_spec_id="hist001_twenty_ninth_bulletin",
         query="Napoleon 29th bulletin December 1812 full text public domain",
         title="29th Bulletin of the Grande Armée, 3 December 1812",
         source_url=(
@@ -194,6 +222,7 @@ SPECS = (
             "Repository-authored paraphrase of a public-domain military "
             "bulletin; retained only as a future-information leakage control."
         ),
+        domains=("military",),
         fact_ids=("military.post_campaign_outcome",),
         note=(
             "The bulletin reports events and conditions during the retreat, "
@@ -203,11 +232,35 @@ SPECS = (
             "evidence. It is retained only to test whether the harness detects and "
             "rejects future-information leakage."
         ),
+        role="future-control",
     ),
 )
 
 
-def prepare(artifact_root: Path) -> Path:
+def _authenticated_manifest(
+    artifact_root: Path,
+    service: ManualAcquisitionService,
+) -> tuple[dict[str, object], bytes]:
+    manifest_path = service.session_dir / "manifest.json"
+    data = secure_read_bytes(
+        manifest_path,
+        root=artifact_root,
+        label="preparation manifest",
+    )
+    try:
+        value = json.loads(data)
+        if not isinstance(value, dict):
+            raise ValueError
+        validate_document("acquisition-session", value)
+        if content_digest(value) != value["content_sha256"]:
+            raise ValueError
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("preparation manifest is invalid") from exc
+    return value, data
+
+
+def prepare(artifact_root: Path) -> PreparationResult:
+    artifact_root = Path(artifact_root)
     service = ManualAcquisitionService(
         artifact_root,
         session_id="acq_hist001_20260724",
@@ -242,6 +295,17 @@ def prepare(artifact_root: Path) -> Path:
             )
             rows.append((spec, candidate, license_basis, note))
 
+    manifest, manifest_bytes = _authenticated_manifest(artifact_root, service)
+    closures = service.snapshot_candidates()
+    _, confirmed_manifest_bytes = _authenticated_manifest(artifact_root, service)
+    if confirmed_manifest_bytes != manifest_bytes:
+        raise ValueError("preparation source changed")
+    candidates = {closure.candidate.candidate_id: closure.candidate for closure in closures}
+    if len(candidates) != len(rows) or set(candidates) != {
+        candidate.candidate_id for _, candidate, _, _ in rows
+    }:
+        raise ValueError("preparation source changed")
+
     review_path = service.session_dir / "candidate-review.md"
     lines = [
         "# HIST-001 Evidence Candidate Review",
@@ -273,12 +337,66 @@ def prepare(artifact_root: Path) -> Path:
                 "",
             ]
         )
-    review_path.write_text("\n".join(lines), encoding="utf-8")
-    return review_path
+    atomic_write_bytes(
+        review_path,
+        "\n".join(lines).encode("utf-8"),
+        root=artifact_root,
+        label="candidate review",
+    )
+
+    metadata = EvidenceImportMetadata.create(
+        project_id="hist-001",
+        session_id=str(manifest["session_id"]),
+        manifest_sha256=str(manifest["content_sha256"]),
+        candidates=tuple(
+            sorted(
+                (
+                    EvidenceImportRow.from_dict(
+                        {
+                            "source_spec_id": spec.source_spec_id,
+                            "candidate_id": candidate.candidate_id,
+                            "candidate_record_sha256": (
+                                candidates[candidate.candidate_id].record_sha256
+                            ),
+                            "candidate_content_sha256": candidate.content_sha256,
+                            "source_type": spec.source_type,
+                            "license_basis": license_basis,
+                            "content_authorship": "repository_authored",
+                            "retention_policy": "paraphrase_only",
+                            "domains": sorted(spec.domains),
+                            "fact_ids": sorted(spec.fact_ids),
+                            "role": spec.role,
+                        }
+                    )
+                    for spec, candidate, license_basis, _ in rows
+                ),
+                key=lambda item: item.candidate_id,
+            )
+        ),
+    )
+    metadata_path = service.session_dir / "candidate-metadata.json"
+    atomic_write_bytes(
+        metadata_path,
+        canonical_json(metadata.to_dict()).encode("utf-8") + b"\n",
+        root=artifact_root,
+        label="candidate metadata",
+    )
+    EvidenceImportMetadata.from_dict(
+        json.loads(
+            secure_read_bytes(
+                metadata_path,
+                root=artifact_root,
+                label="candidate metadata",
+            )
+        )
+    )
+    return PreparationResult(review_path=review_path, metadata_path=metadata_path)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifact-root", type=Path, required=True)
     arguments = parser.parse_args()
-    print(prepare(arguments.artifact_root))
+    result = prepare(arguments.artifact_root)
+    print(result.review_path.name)
+    print(result.metadata_path.name)

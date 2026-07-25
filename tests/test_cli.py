@@ -102,6 +102,8 @@ def test_inspect_reports_identity_stages_grades_cost_and_resume(
 def test_invalid_arguments_return_two(capsys) -> None:
     assert main(["eval"]) == 2
     assert "usage:" in capsys.readouterr().err.lower()
+    assert main(["evidence"]) == 2
+    assert "usage:" in capsys.readouterr().err.lower()
 
 
 def test_failed_eval_returns_one(tmp_path: Path, capsys) -> None:

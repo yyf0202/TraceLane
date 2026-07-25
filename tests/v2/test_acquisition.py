@@ -1595,20 +1595,22 @@ def test_preparation_review_sheet_uses_sanitized_candidate_facing_values(
 ) -> None:
     github_token = "ghp_" + "a" * 36
     spec = preparation.CandidateSpec(
+        source_spec_id="hist001_sanitization_test",
         query=f"lookup {github_token}",
         title="Title person@example.test",
         source_url="https://history.example/source",
         document_date="1812-05",
         source_type="primary",
         license_basis="Stored at C:/Users/name/license.txt",
+        domains=("diplomacy",),
         fact_ids=("fact.safe",),
         note="Call +1 (415) 555-2671",
     )
     monkeypatch.setattr(preparation, "SPECS", (spec,))
 
-    review_path = preparation.prepare(tmp_path)
+    result = preparation.prepare(tmp_path)
 
-    review_text = review_path.read_text(encoding="utf-8")
+    review_text = result.review_path.read_text(encoding="utf-8")
     for forbidden in (
         github_token,
         "person@example.test",
