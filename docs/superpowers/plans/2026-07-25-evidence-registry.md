@@ -406,8 +406,9 @@ git commit -m "feat: add evidence registry contracts"
 
 - Consumes:
   - `ArtifactRef` from Task 1 dependencies.
-  - `atomic_create_bytes`, `atomic_write_bytes`, `secure_read_bytes`, and
-    `assert_safe_tree` from `tracelane.v2.storage`.
+  - `atomic_create_bytes`, `atomic_write_bytes`, and `secure_read_bytes` from
+    `tracelane.v2.storage`.
+  - `assert_safe_tree` from `tracelane.security`.
 - Produces:
   - `EvidenceRoot.open(path: str | Path) -> EvidenceRoot`
   - `EvidenceRoot.create(path: str | Path) -> EvidenceRoot`
@@ -421,7 +422,8 @@ git commit -m "feat: add evidence registry contracts"
 
 Cover:
 
-- valid project, candidate, review, transformation, and blob URIs;
+- valid project, project-index, candidate, review, transformation, and blob
+  URIs;
 - logical blob URI mapping from
   `tracelane://evidence/blobs/sha256/<sha256>` to the physical
   `evidence/blobs/sha256/<first-two-hex>/<sha256>.blob` path;

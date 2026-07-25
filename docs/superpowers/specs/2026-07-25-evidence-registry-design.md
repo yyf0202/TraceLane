@@ -291,6 +291,7 @@ Registry references use these namespaces:
 ```text
 tracelane://evidence/registry.json
 tracelane://evidence/projects/<project-id>/project.json
+tracelane://evidence/projects/<project-id>/index.json
 tracelane://evidence/projects/<project-id>/candidates/<file>
 tracelane://evidence/projects/<project-id>/reviews/<file>
 tracelane://evidence/projects/<project-id>/transformations/<file>
