@@ -22,6 +22,8 @@ deterministic grades.
 
 - Deterministic `gather → analyze → debate? → finalize → validate → publish` loop.
 - Point-in-time evidence freezing with explicit cutoff timestamps.
+- A content-addressed evidence registry for project-scoped candidate evidence
+  and retained human review decisions.
 - Raw and budgeted context-selection policies.
 - Conditional and always-on debate policies.
 - Content-addressed run identities and canonical JSON artifacts.
@@ -234,6 +236,7 @@ python -m pytest -q
 - Add debate-policy and recovery-policy ablations.
 - Export post-training-ready trace and grader JSONL.
 - Add calibrated human and model-based graders.
+- Grow project-scoped evidence registries through explicit human review.
 - Explore model–harness co-evolution and learned workflow policies.
 
 ## License
