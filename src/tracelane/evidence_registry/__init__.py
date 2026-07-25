@@ -6,6 +6,14 @@ from tracelane.evidence_registry.contracts import (
     ProjectEvidenceCandidate,
     candidate_record_digest,
 )
+from tracelane.evidence_registry.reviews import (
+    EvidenceReview,
+    ReviewChain,
+    append_review,
+    current_review,
+    effective_status,
+    validate_review_chain,
+)
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
     EvidenceRoot,
@@ -18,10 +26,16 @@ __all__ = [
     "EvidenceImportMetadata",
     "EvidenceImportRow",
     "EvidenceProject",
+    "EvidenceReview",
     "EvidenceRoot",
     "EvidenceTransformation",
     "ProjectEvidenceCandidate",
+    "ReviewChain",
+    "append_review",
     "candidate_record_digest",
+    "current_review",
+    "effective_status",
     "read_json_object",
+    "validate_review_chain",
     "write_json_create_or_match",
 ]
