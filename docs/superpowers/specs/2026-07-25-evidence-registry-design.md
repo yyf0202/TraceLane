@@ -213,7 +213,7 @@ Review files are immutable and append-only. A review contains:
 - review timestamp;
 - approved fact IDs;
 - approved evidence domains;
-- license and raw-retention decision;
+- the reviewed candidate's exact `license_basis` and `retention_policy`;
 - optional `supersedes_review_id`; and
 - review record digest.
 

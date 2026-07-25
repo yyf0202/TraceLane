@@ -540,6 +540,39 @@ class ReviewChain:
     effective_status: Literal["pending", "approved", "rejected", "superseded"]
 ```
 
+The exact `EvidenceReview` wire contract is:
+
+```text
+schema_id = tracelane://schemas/evidence-review/v1
+schema_version = 1.0.0
+record_sha256: lowercase SHA-256 over the record without record_sha256
+review_id: review_<24 lowercase hex>, derived from the business identity
+project_id
+candidate_id
+candidate_record_sha256
+decision: approved | rejected | superseded
+reason
+reviewer
+reviewed_at: canonical UTC date-time
+approved_fact_ids: sorted unique strings
+approved_domains: sorted unique strings
+license_basis: exact reviewed candidate value
+retention_policy: exact reviewed candidate value
+supersedes_review_id: review_<24 lowercase hex>, omitted for the first review
+```
+
+The business identity used for `review_id` contains every field from
+`project_id` through `supersedes_review_id`, omitting the optional predecessor
+when absent. It excludes schema metadata, `review_id`, and `record_sha256`.
+The complete record digest includes the derived `review_id`.
+
+For a review bound to the current candidate digest, `license_basis` and
+`retention_policy` must equal the candidate. An approved review has non-empty
+approved fact/domain sets that are subsets of the candidate. Rejected and
+superseded decisions have empty approved sets. Historical reviews bound to an
+older valid candidate digest remain structurally loadable; only a chain head
+bound to the current candidate digest produces a non-pending effective status.
+
 - [ ] **Step 1: Write failing lifecycle tests**
 
 Cover no-review pending, first approval/rejection, a valid superseding review,
