@@ -94,11 +94,11 @@ evidence/
         ├── project.json
         ├── index.json
         ├── candidates/
-        │   └── candidate_<candidate-id>.json
+        │   └── <candidate-id>.json
         ├── reviews/
-        │   └── review_<review-id>.json
+        │   └── <review-id>.json
         └── transformations/
-            └── transformation_<transformation-id>.json
+            └── <transformation-id>.json
 ```
 
 All paths are repository relative. Persisted records must not contain the

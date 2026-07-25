@@ -620,7 +620,7 @@ head bound to another current candidate digest.
 The URI is:
 
 ```python
-f"tracelane://evidence/projects/{project_id}/reviews/review_{review_id}.json"
+f"tracelane://evidence/projects/{project_id}/reviews/{review_id}.json"
 ```
 
 Publication is create-new or exact-match only. There is no update or delete
