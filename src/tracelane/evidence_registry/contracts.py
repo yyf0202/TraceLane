@@ -29,7 +29,7 @@ _SOURCE_CANDIDATE_URI = re.compile(
     r"^tracelane://artifacts/[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
 )
 _BLOB_URI = re.compile(r"^tracelane://evidence/blobs/sha256/[0-9a-f]{64}$")
-_LOCAL_STATE_COMPONENT = re.compile(r"(?:^|[\\/])\.local(?:$|[\\/])")
+_LOCAL_STATE_COMPONENT = re.compile(r"(?i)(?<!\w)\.local(?=$|[\\/])")
 _SOURCE_TYPES = frozenset({"primary", "secondary", "dataset"})
 _ROLES = frozenset({"evidence", "future-control"})
 _AUTHORS = frozenset({"repository_authored", "third_party"})

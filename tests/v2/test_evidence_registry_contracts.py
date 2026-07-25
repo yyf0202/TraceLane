@@ -366,6 +366,54 @@ def test_transformation_rejects_unsafe_nested_parameters_without_echo(
     assert_sensitive_text_is_rejected(create_transformation, sensitive)
 
 
+def test_candidate_rejects_leading_space_local_state_domain_without_echo(
+    candidate_input: dict[str, object],
+) -> None:
+    local_state_reference = " .local/runtime.json"
+    candidate_input["domains"] = (local_state_reference,)
+
+    assert_sensitive_text_is_rejected(
+        lambda: ProjectEvidenceCandidate.create(**candidate_input), local_state_reference
+    )
+
+
+def test_transformation_rejects_leading_space_local_state_parameter_without_echo() -> None:
+    local_state_reference = " .local/runtime.json"
+
+    def create_transformation() -> EvidenceTransformation:
+        return EvidenceTransformation.create(
+            project_id="hist-001",
+            candidate_id="candidate_" + "a" * 24,
+            transformation_type="ocr",
+            input_ref=blob_ref(),
+            output_ref=blob_ref(digest="d" * 64),
+            actor="operator",
+            method="OCR",
+            parameters={"nested": [local_state_reference]},
+            created_at=datetime(2026, 7, 24, tzinfo=UTC),
+            license_implications="None.",
+        )
+
+    assert_sensitive_text_is_rejected(create_transformation, local_state_reference)
+
+
+def test_project_rejects_uppercase_local_state_title_without_echo(
+    project_input: dict[str, object],
+) -> None:
+    local_state_reference = r".LOCAL\runtime.json"
+    project_input["title"] = local_state_reference
+
+    assert_sensitive_text_is_rejected(
+        lambda: EvidenceProject.create(**project_input), local_state_reference
+    )
+
+
+def test_project_allows_non_component_local_word(project_input: dict[str, object]) -> None:
+    project_input["title"] = "foo.locality historical dossier"
+
+    assert EvidenceProject.create(**project_input).title == "foo.locality historical dossier"
+
+
 @pytest.mark.parametrize(
     ("field", "sensitive"),
     [
