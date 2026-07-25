@@ -553,10 +553,12 @@ class _ProjectFiles:
     candidates: tuple[Path, ...]
     reviews: tuple[Path, ...]
     transformations: tuple[Path, ...]
+    source_inventory: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class _ProjectSnapshot:
+    source_inventory: tuple[str, ...]
     project: EvidenceProject
     project_ref: ArtifactRef
     candidates: tuple[tuple[ProjectEvidenceCandidate, ArtifactRef], ...]
@@ -638,13 +640,25 @@ def _discover_project(root: EvidenceRoot, project_id: str) -> _ProjectFiles:
                 raise ValueError("evidence project inventory is invalid")
         elif not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise ValueError("evidence project inventory is invalid")
+    candidates = _managed_json_files(project_dir, "candidates")
+    reviews = _managed_json_files(project_dir, "reviews")
+    transformations = _managed_json_files(project_dir, "transformations")
+    source_inventory = tuple(
+        sorted(
+            [path.name for path in children if path.name != "index.json"]
+            + [f"candidates/{path.name}" for path in candidates]
+            + [f"reviews/{path.name}" for path in reviews]
+            + [f"transformations/{path.name}" for path in transformations]
+        )
+    )
     return _ProjectFiles(
         project_id=project_id,
         project=project_dir / "project.json",
         index=(project_dir / "index.json") if "index.json" in names else None,
-        candidates=_managed_json_files(project_dir, "candidates"),
-        reviews=_managed_json_files(project_dir, "reviews"),
-        transformations=_managed_json_files(project_dir, "transformations"),
+        candidates=candidates,
+        reviews=reviews,
+        transformations=transformations,
+        source_inventory=source_inventory,
     )
 
 
@@ -869,6 +883,7 @@ def _validate_closure(
                 raise ValueError("candidate date exceeds the project cutoff")
 
         transformation_ids: list[str] = []
+        previous_output: ArtifactRef | None = None
         for reference in candidate.transformation_refs:
             transformation_id = Path(reference.uri).stem
             item = transformations_by_id.get(transformation_id)
@@ -884,7 +899,18 @@ def _validate_closure(
             consumed_transformations[transformation_id] += 1
             blob_store.verify(transformation.input_ref)
             blob_store.verify(transformation.output_ref)
+            if (
+                previous_output is not None
+                and previous_output != transformation.input_ref
+            ):
+                raise ValueError("candidate transformation lineage is disconnected")
+            previous_output = transformation.output_ref
             transformation_ids.append(transformation_id)
+        if (
+            candidate.transformation_refs
+            and previous_output != candidate.content_ref
+        ):
+            raise ValueError("candidate transformation lineage is disconnected")
 
         candidate_reviews = reviews_by_candidate[candidate.candidate_id]
         try:
@@ -953,6 +979,7 @@ def _load_project_snapshot(
         transformations,
     )
     return _ProjectSnapshot(
+        source_inventory=files.source_inventory,
         project=project,
         project_ref=project_ref,
         candidates=tuple(candidates),
@@ -989,7 +1016,7 @@ def _read_persisted_index(
     return reference
 
 
-def _derive_registry(
+def _derive_registry_once(
     root: EvidenceRoot,
 ) -> tuple[
     EvidenceRegistry,
@@ -1030,12 +1057,48 @@ def _derive_registry(
     )
 
 
+def _reauthenticate_project_snapshot(
+    root: EvidenceRoot,
+    expected: _ProjectSnapshot,
+) -> _ProjectSnapshot:
+    try:
+        current = _load_project_snapshot(root, expected.project.project_id)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("evidence source snapshot changed") from exc
+    if current != expected:
+        raise ValueError("evidence source snapshot changed")
+    return current
+
+
+def _reauthenticate_registry_state(
+    root: EvidenceRoot,
+    expected: tuple[
+        EvidenceRegistry,
+        tuple[_ProjectSnapshot, ...],
+        Mapping[str, ArtifactRef],
+    ],
+) -> tuple[
+    EvidenceRegistry,
+    tuple[_ProjectSnapshot, ...],
+    Mapping[str, ArtifactRef],
+]:
+    try:
+        current = _derive_registry_once(root)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("evidence source snapshot changed") from exc
+    if current != expected:
+        raise ValueError("evidence source snapshot changed")
+    return current
+
+
 def build_project_index(
     root: EvidenceRoot | str | Path,
     project_id: str,
 ) -> EvidenceProjectIndex:
     authenticated_root = _as_root(root)
-    return _load_project_snapshot(authenticated_root, project_id).expected_index
+    initial = _load_project_snapshot(authenticated_root, project_id)
+    final = _reauthenticate_project_snapshot(authenticated_root, initial)
+    return final.expected_index
 
 
 def rebuild_project_index(
@@ -1043,32 +1106,39 @@ def rebuild_project_index(
     project_id: str,
 ) -> ArtifactRef:
     authenticated_root = _as_root(root)
-    index = _load_project_snapshot(authenticated_root, project_id).expected_index
-    return write_json_create_or_match(
+    initial = _load_project_snapshot(authenticated_root, project_id)
+    final = _reauthenticate_project_snapshot(authenticated_root, initial)
+    reference = write_json_create_or_match(
         authenticated_root,
         _json_uri(project_id, "index", "index.json"),
         "evidence_project_index",
         _PROJECT_INDEX_SCHEMA,
-        index.to_dict(),
+        final.expected_index.to_dict(),
     )
+    _reauthenticate_project_snapshot(authenticated_root, initial)
+    return reference
 
 
 def build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
     authenticated_root = _as_root(root)
-    registry, _, _ = _derive_registry(authenticated_root)
-    return registry
+    initial = _derive_registry_once(authenticated_root)
+    final = _reauthenticate_registry_state(authenticated_root, initial)
+    return final[0]
 
 
 def rebuild_registry(root: EvidenceRoot | str | Path) -> ArtifactRef:
     authenticated_root = _as_root(root)
-    registry, _, _ = _derive_registry(authenticated_root)
-    return write_json_create_or_match(
+    initial = _derive_registry_once(authenticated_root)
+    final = _reauthenticate_registry_state(authenticated_root, initial)
+    reference = write_json_create_or_match(
         authenticated_root,
         "tracelane://evidence/registry.json",
         "evidence_registry",
         _REGISTRY_SCHEMA,
-        registry.to_dict(),
+        final[0].to_dict(),
     )
+    _reauthenticate_registry_state(authenticated_root, initial)
+    return reference
 
 
 def _read_registry(
@@ -1099,9 +1169,13 @@ def _verified_state(
     Mapping[str, ArtifactRef],
     ArtifactRef,
 ]:
-    registry, snapshots, index_refs = _derive_registry(root)
-    registry_ref = _read_registry(root, registry)
-    return snapshots, index_refs, registry_ref
+    initial = _derive_registry_once(root)
+    initial_registry_ref = _read_registry(root, initial[0])
+    final = _reauthenticate_registry_state(root, initial)
+    final_registry_ref = _read_registry(root, final[0])
+    if final_registry_ref != initial_registry_ref:
+        raise ValueError("evidence source snapshot changed")
+    return final[1], final[2], final_registry_ref
 
 
 def verify_evidence_registry(

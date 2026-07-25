@@ -186,7 +186,7 @@ ProjectEvidenceCandidate
   fact_ids: non-empty sorted unique tuple[str, ...]
   content_ref: ArtifactRef(kind=evidence_blob, schema_id absent,
                URI under tracelane://evidence/blobs/sha256/)
-  transformation_refs: sorted unique tuple of
+  transformation_refs: ordered unique tuple of
                ArtifactRef(kind=evidence_transformation, schema_id absent)
   content_sha256: equal to content_ref.sha256
   content_authorship: repository_authored|third_party

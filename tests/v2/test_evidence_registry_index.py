@@ -9,6 +9,7 @@ import pytest
 
 from tracelane.acquisition.contracts import compute_candidate_id
 from tracelane.contracts import canonical_json
+from tracelane.evidence_registry import index as evidence_index
 from tracelane.evidence_registry.contracts import (
     EvidenceProject,
     EvidenceTransformation,
@@ -20,6 +21,7 @@ from tracelane.evidence_registry.index import (
     EvidenceProjectIndex,
     EvidenceQuery,
     build_project_index,
+    build_registry,
     find_evidence,
     rebuild_project_index,
     rebuild_registry,
@@ -426,15 +428,12 @@ def _add_transformation_to_pending_candidate(
     input_ref = EvidenceBlobStore(root).put_bytes(
         b"transformation input", "text/plain", "evidence_blob"
     )
-    output_ref = EvidenceBlobStore(root).put_bytes(
-        b"transformation output", "text/plain", "evidence_blob"
-    )
     transformation = EvidenceTransformation.create(
         project_id="hist-001",
         candidate_id=candidate.candidate_id,
         transformation_type="normalization",
         input_ref=input_ref,
-        output_ref=output_ref,
+        output_ref=candidate.content_ref,
         actor="repository curator",
         method="Normalize whitespace.",
         parameters={"line_endings": "lf"},
@@ -587,3 +586,278 @@ def test_post_cutoff_non_future_candidate_is_rejected(
 
     with pytest.raises(ValueError, match="cutoff"):
         build_project_index(registry_root, "hist-001")
+
+
+def _candidate_path_for_fact(root: EvidenceRoot, fact_id: str) -> Path:
+    return next(
+        path
+        for path in sorted(
+            (root.path / "projects" / "hist-001" / "candidates").glob("*.json")
+        )
+        if fact_id
+        in ProjectEvidenceCandidate.from_dict(
+            json.loads(path.read_text(encoding="utf-8"))
+        ).fact_ids
+    )
+
+
+def _planned_transformation_ref(
+    transformation: EvidenceTransformation,
+) -> ArtifactRef:
+    data = canonical_json(transformation.to_dict()).encode("utf-8") + b"\n"
+    return ArtifactRef.from_dict(
+        {
+            "kind": "evidence_transformation",
+            "uri": (
+                "tracelane://evidence/projects/hist-001/transformations/"
+                f"{transformation.transformation_id}.json"
+            ),
+            "media_type": "application/json",
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+            "schema_id": "tracelane://schemas/evidence-transformation/v1",
+        }
+    )
+
+
+def _install_lineage(
+    root: EvidenceRoot,
+    disconnected_at: str | None,
+) -> tuple[str, ...]:
+    candidate_path = _candidate_path_for_fact(root, "fact.1")
+    candidate = ProjectEvidenceCandidate.from_dict(
+        json.loads(candidate_path.read_text(encoding="utf-8"))
+    )
+    source = EvidenceBlobStore(root).put_bytes(
+        b"lineage source", "text/plain", "evidence_blob"
+    )
+    middle_one = EvidenceBlobStore(root).put_bytes(
+        b"lineage middle one", "text/plain", "evidence_blob"
+    )
+    middle_two = EvidenceBlobStore(root).put_bytes(
+        b"lineage middle two", "text/plain", "evidence_blob"
+    )
+    disconnected = EvidenceBlobStore(root).put_bytes(
+        b"lineage disconnected", "text/plain", "evidence_blob"
+    )
+    final_ref = candidate.content_ref
+    links = {
+        "first": (
+            (source, middle_one),
+            (disconnected, final_ref),
+        ),
+        "intermediate": (
+            (source, middle_one),
+            (middle_one, middle_two),
+            (disconnected, final_ref),
+        ),
+        "final": ((source, disconnected),),
+        None: (
+            (source, middle_one),
+            (middle_one, middle_two),
+            (middle_two, final_ref),
+        ),
+    }[disconnected_at]
+
+    transformations: tuple[EvidenceTransformation, ...] | None = None
+    planned_refs: tuple[ArtifactRef, ...] | None = None
+    for attempt in range(200):
+        values = tuple(
+            EvidenceTransformation.create(
+                project_id="hist-001",
+                candidate_id=candidate.candidate_id,
+                transformation_type="normalization",
+                input_ref=input_ref,
+                output_ref=output_ref,
+                actor=f"repository curator {attempt}",
+                method=f"Lineage step {position}.",
+                parameters={"position": position},
+                created_at=datetime(2026, 7, 25, position, tzinfo=UTC),
+                license_implications="No change.",
+            )
+            for position, (input_ref, output_ref) in enumerate(links, start=1)
+        )
+        refs = tuple(_planned_transformation_ref(item) for item in values)
+        keys = tuple(canonical_json(item.to_dict()) for item in refs)
+        if keys == tuple(sorted(keys)):
+            transformations = values
+            planned_refs = refs
+            break
+    assert transformations is not None
+    assert planned_refs is not None
+
+    candidate_refs: list[ArtifactRef] = []
+    for transformation, planned_ref in zip(
+        transformations, planned_refs, strict=True
+    ):
+        actual_ref = write_json_create_or_match(
+            root,
+            planned_ref.uri,
+            "evidence_transformation",
+            "tracelane://schemas/evidence-transformation/v1",
+            transformation.to_dict(),
+        )
+        assert actual_ref == planned_ref
+        ref_value = actual_ref.to_dict()
+        ref_value.pop("schema_id")
+        candidate_refs.append(ArtifactRef.from_dict(ref_value))
+    candidate_value = candidate.to_dict()
+    candidate_value["transformation_refs"] = [
+        item.to_dict() for item in candidate_refs
+    ]
+    candidate_value["record_sha256"] = candidate_record_digest(candidate_value)
+    _rewrite_json(candidate_path, candidate_value)
+    return tuple(item.transformation_id for item in transformations)
+
+
+def test_ordered_transformation_lineage_is_accepted(
+    registry_root: EvidenceRoot,
+) -> None:
+    transformation_ids = _install_lineage(registry_root, None)
+
+    index = build_project_index(registry_root, "hist-001")
+
+    entry = next(item for item in index.entries if item.fact_ids == ("fact.1",))
+    assert entry.transformation_ids == tuple(sorted(transformation_ids))
+
+
+@pytest.mark.parametrize("disconnected_at", ["first", "intermediate", "final"])
+def test_disconnected_transformation_lineage_is_rejected(
+    registry_root: EvidenceRoot,
+    disconnected_at: str,
+) -> None:
+    _install_lineage(registry_root, disconnected_at)
+
+    with pytest.raises(ValueError, match="transformation lineage"):
+        build_project_index(registry_root, "hist-001")
+
+
+def _mutate_candidate_record(root: EvidenceRoot) -> None:
+    path = _candidate_path_for_fact(root, "fact.1")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["domains"] = ["diplomacy", "snapshot-change"]
+    value["record_sha256"] = candidate_record_digest(value)
+    _rewrite_json(path, value)
+
+
+def _mutate_candidate_blob(root: EvidenceRoot) -> None:
+    path = _candidate_path_for_fact(root, "fact.1")
+    candidate = ProjectEvidenceCandidate.from_dict(
+        json.loads(path.read_text(encoding="utf-8"))
+    )
+    root.resolve(candidate.content_ref.uri, must_exist=True).write_bytes(
+        b"changed after derivation"
+    )
+
+
+def _mutate_inventory(root: EvidenceRoot) -> None:
+    (
+        root.path / "projects" / "hist-001" / "candidates" / "late-entry.txt"
+    ).write_text("changed", encoding="utf-8")
+
+
+def _mutate_after_first_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    root: EvidenceRoot,
+    mutation,
+) -> None:
+    original = evidence_index._load_project_snapshot
+    calls = 0
+
+    def changing_snapshot(*args, **kwargs):
+        nonlocal calls
+        snapshot = original(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            mutation(root)
+        return snapshot
+
+    monkeypatch.setattr(
+        evidence_index,
+        "_load_project_snapshot",
+        changing_snapshot,
+    )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda root: build_project_index(root, "hist-001"),
+        build_registry,
+        verify_evidence_registry,
+        lambda root: find_evidence(root, EvidenceQuery("hist-001")),
+    ],
+    ids=["project-build", "registry-build", "verify", "find"],
+)
+def test_read_paths_reauthenticate_source_snapshot_before_success(
+    registry_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    operation,
+) -> None:
+    _mutate_after_first_snapshot(
+        monkeypatch,
+        registry_root,
+        _mutate_candidate_record,
+    )
+
+    with pytest.raises(ValueError, match="source snapshot changed"):
+        operation(registry_root)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [_mutate_inventory, _mutate_candidate_blob],
+    ids=["inventory", "blob"],
+)
+def test_final_reauthentication_covers_inventory_and_referenced_blobs(
+    registry_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation,
+) -> None:
+    _mutate_after_first_snapshot(monkeypatch, registry_root, mutation)
+
+    with pytest.raises(ValueError, match="source snapshot changed"):
+        verify_evidence_registry(registry_root)
+
+
+@pytest.mark.parametrize("publication", ["project-index", "registry"])
+def test_rebuild_reauthenticates_after_publication_before_returning(
+    registry_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    publication: str,
+) -> None:
+    if publication == "project-index":
+        target = registry_root.resolve(
+            "tracelane://evidence/projects/hist-001/index.json",
+            must_exist=True,
+        )
+    else:
+        target = registry_root.resolve(
+            "tracelane://evidence/registry.json",
+            must_exist=True,
+        )
+
+    def operation() -> None:
+        if publication == "project-index":
+            rebuild_project_index(registry_root, "hist-001")
+        else:
+            rebuild_registry(registry_root)
+
+    target.unlink()
+    original_write = evidence_index.write_json_create_or_match
+
+    def changing_write(*args, **kwargs):
+        reference = original_write(*args, **kwargs)
+        _mutate_candidate_record(registry_root)
+        return reference
+
+    monkeypatch.setattr(
+        evidence_index,
+        "write_json_create_or_match",
+        changing_write,
+    )
+
+    with pytest.raises(ValueError, match="source snapshot changed"):
+        operation()
+
+    assert target.exists()

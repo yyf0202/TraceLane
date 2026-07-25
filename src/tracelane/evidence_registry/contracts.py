@@ -104,15 +104,15 @@ def _sorted_unique_strings(value: object, label: str, *, required: bool = True) 
     return normalized  # type: ignore[return-value]
 
 
-def _sorted_unique_refs(value: object, label: str) -> tuple[ArtifactRef, ...]:
+def _ordered_unique_refs(value: object, label: str) -> tuple[ArtifactRef, ...]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise ValueError(f"{label} must be a sequence")
     references = tuple(value)
     if not all(isinstance(item, ArtifactRef) for item in references):
         raise ValueError(f"{label} must contain ArtifactRef values")
     keys = tuple(canonical_json(item.to_dict()) for item in references)
-    if tuple(sorted(keys)) != keys or len(set(keys)) != len(keys):
-        raise ValueError(f"{label} must be sorted and unique")
+    if len(set(keys)) != len(keys):
+        raise ValueError(f"{label} must be unique")
     return references  # type: ignore[return-value]
 
 
@@ -406,7 +406,7 @@ class ProjectEvidenceCandidate:
         if candidate.role not in _ROLES:
             raise ValueError("role is invalid")
         _blob_ref(candidate.content_ref, "content_ref", require_blob_uri=True)
-        _sorted_unique_refs(candidate.transformation_refs, "transformation_refs")
+        _ordered_unique_refs(candidate.transformation_refs, "transformation_refs")
         if candidate.content_sha256 != candidate.content_ref.sha256:
             raise ValueError("content_sha256 does not match content_ref")
         _validate_retention(candidate.content_authorship, candidate.retention_policy)

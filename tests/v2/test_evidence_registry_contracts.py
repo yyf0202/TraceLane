@@ -128,6 +128,25 @@ def test_project_candidate_round_trip(candidate_input: dict[str, object]) -> Non
     assert "status" not in candidate.to_dict()
 
 
+def test_candidate_transformation_refs_preserve_lineage_order(
+    candidate_input: dict[str, object],
+) -> None:
+    later_sort_key = transformation_ref(digest="c" * 64)
+    earlier_sort_key = transformation_ref(digest="b" * 64)
+    candidate_input["transformation_refs"] = (later_sort_key, earlier_sort_key)
+
+    candidate = ProjectEvidenceCandidate.create(**candidate_input)
+
+    assert candidate.transformation_refs == (later_sort_key, earlier_sort_key)
+    with pytest.raises(ValueError, match="transformation_refs"):
+        ProjectEvidenceCandidate.create(
+            **(
+                candidate_input
+                | {"transformation_refs": (later_sort_key, later_sort_key)}
+            )
+        )
+
+
 def test_candidate_rejects_mismatched_lineage(candidate_input: dict[str, object]) -> None:
     candidate_input["source_candidate_content_sha256"] = "d" * 64
 
