@@ -287,6 +287,25 @@ def test_project_candidate_schema_covers_enums_and_digest_pattern(
         validate_document("project-evidence-candidate", value)
 
 
+@pytest.mark.parametrize(
+    ("content_authorship", "retention_policy"),
+    [
+        ("repository_authored", "licensed_full_text"),
+        ("third_party", "paraphrase_only"),
+    ],
+)
+def test_project_candidate_schema_rejects_invalid_retention_pair(
+    content_authorship: str,
+    retention_policy: str,
+) -> None:
+    value = registry_candidate_value()
+    value["content_authorship"] = content_authorship
+    value["retention_policy"] = retention_policy
+
+    with pytest.raises(SchemaValidationError):
+        validate_document("project-evidence-candidate", value)
+
+
 def test_project_schema_covers_status_source_types_and_duplicate_arrays() -> None:
     project = EvidenceProject.create(
         project_id="hist-001",

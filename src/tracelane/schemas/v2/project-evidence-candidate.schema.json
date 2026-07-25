@@ -119,6 +119,43 @@
       ]
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "content_authorship": {
+            "const": "repository_authored"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "retention_policy": {
+            "const": "paraphrase_only"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "content_authorship": {
+            "const": "third_party"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "retention_policy": {
+            "enum": [
+              "public_domain_full_text",
+              "licensed_full_text"
+            ]
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "schema_id": {
       "const": "tracelane://schemas/project-evidence-candidate/v1"

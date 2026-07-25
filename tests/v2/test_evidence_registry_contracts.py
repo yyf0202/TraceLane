@@ -135,6 +135,19 @@ def test_candidate_rejects_mismatched_lineage(candidate_input: dict[str, object]
         ProjectEvidenceCandidate.create(**candidate_input)
 
 
+def test_candidate_rejects_blob_uri_with_different_declared_digest(
+    candidate_input: dict[str, object],
+) -> None:
+    value = ProjectEvidenceCandidate.create(**candidate_input).to_dict()
+    content_ref = value["content_ref"]
+    assert isinstance(content_ref, dict)
+    content_ref["uri"] = f"tracelane://evidence/blobs/sha256/{'d' * 64}"
+    value["record_sha256"] = candidate_record_digest(value)
+
+    with pytest.raises(ValueError, match="content_ref"):
+        ProjectEvidenceCandidate.from_dict(value)
+
+
 @pytest.mark.parametrize("field", ["domains", "fact_ids"])
 def test_candidate_rejects_duplicate_or_unsorted_wire_values(
     candidate_input: dict[str, object], field: str
@@ -152,7 +165,7 @@ def test_third_party_content_requires_positive_retention(
 ) -> None:
     candidate_input["content_authorship"] = "third_party"
     candidate_input["retention_policy"] = "paraphrase_only"
-    with pytest.raises(ValueError, match="retention policy"):
+    with pytest.raises(ValueError, match="retention[_ ]policy"):
         ProjectEvidenceCandidate.create(**candidate_input)
 
 
@@ -247,3 +260,97 @@ def test_candidate_record_digest_excludes_only_record_digest() -> None:
     changed["record_sha256"] = "b" * 64
 
     assert candidate_record_digest(value) == candidate_record_digest(changed)
+
+
+def assert_sensitive_text_is_rejected(call: object, sensitive: str) -> None:
+    assert callable(call)
+    with pytest.raises(ValueError, match="sensitive text") as captured:
+        call()
+    assert sensitive not in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    ("field", "sensitive"),
+    [
+        ("title", r"C:\private\project-title.txt"),
+        ("research_question", "/opt/private/research-question.txt"),
+        ("intervention", "contact person@example.test"),
+    ],
+)
+def test_project_rejects_sensitive_persisted_text(
+    project_input: dict[str, object],
+    field: str,
+    sensitive: str,
+) -> None:
+    project_input[field] = sensitive
+
+    assert_sensitive_text_is_rejected(lambda: EvidenceProject.create(**project_input), sensitive)
+
+
+@pytest.mark.parametrize(
+    ("field", "sensitive"),
+    [
+        ("query", r"C:\private\candidate-query.txt"),
+        ("title", "/opt/private/candidate-title.txt"),
+        ("curator", "person@example.test"),
+        ("license_basis", "Bearer sk-abcdefghijklmnop"),
+    ],
+)
+def test_candidate_rejects_sensitive_persisted_text(
+    candidate_input: dict[str, object],
+    field: str,
+    sensitive: str,
+) -> None:
+    candidate_input[field] = sensitive
+    if field in {"query", "title"}:
+        content_ref = candidate_input["content_ref"]
+        assert isinstance(content_ref, ArtifactRef)
+        candidate_id = compute_candidate_id(
+            query=str(candidate_input["query"]),
+            title=str(candidate_input["title"]),
+            source_url=str(candidate_input["source_url"]),
+            document_date=str(candidate_input["document_date"]),
+            date_precision=str(candidate_input["date_precision"]),
+            content_sha256=content_ref.sha256,
+        )
+        candidate_input["candidate_id"] = candidate_id
+        candidate_input["source_candidate_id"] = candidate_id
+
+    assert_sensitive_text_is_rejected(
+        lambda: ProjectEvidenceCandidate.create(**candidate_input), sensitive
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "sensitive"),
+    [
+        ("actor", r"C:\private\transformation-actor.txt"),
+        ("method", "/opt/private/transformation-method.txt"),
+        ("license_implications", "person@example.test"),
+    ],
+)
+def test_transformation_rejects_sensitive_persisted_text(field: str, sensitive: str) -> None:
+    value: dict[str, object] = {
+        "project_id": "hist-001",
+        "candidate_id": "candidate_" + "a" * 24,
+        "transformation_type": "ocr",
+        "input_ref": blob_ref(),
+        "output_ref": blob_ref(digest="d" * 64),
+        "actor": "operator",
+        "method": "OCR",
+        "parameters": {},
+        "created_at": datetime(2026, 7, 24, tzinfo=UTC),
+        "license_implications": "None.",
+    }
+    value[field] = sensitive
+
+    assert_sensitive_text_is_rejected(lambda: EvidenceTransformation.create(**value), sensitive)
+
+
+def test_import_row_rejects_sensitive_license_basis(candidate_input: dict[str, object]) -> None:
+    row = EvidenceImportRow.from_candidate(ProjectEvidenceCandidate.create(**candidate_input))
+    value = row.to_dict()
+    sensitive = r"C:\private\license-basis.txt"
+    value["license_basis"] = sensitive
+
+    assert_sensitive_text_is_rejected(lambda: EvidenceImportRow.from_dict(value), sensitive)

@@ -9,6 +9,7 @@ from typing import Literal
 
 from tracelane.acquisition.contracts import compute_candidate_id
 from tracelane.contracts import canonical_json, parse_utc, sha256_json
+from tracelane.security import classify_and_redact
 from tracelane.v2.contracts import (
     ArtifactRef,
     content_digest,
@@ -49,7 +50,10 @@ def candidate_record_digest(value: Mapping[str, object]) -> str:
 def _non_empty(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} must be a non-empty string")
-    return value.strip()
+    normalized = value.strip()
+    if classify_and_redact(normalized).redaction_applied:
+        raise ValueError(f"{label} contains sensitive text")
+    return normalized
 
 
 def _digest(value: object, label: str) -> str:
@@ -92,8 +96,11 @@ def _sorted_unique_refs(value: object, label: str) -> tuple[ArtifactRef, ...]:
 def _blob_ref(reference: ArtifactRef, label: str, *, require_blob_uri: bool = False) -> ArtifactRef:
     if reference.kind != "evidence_blob" or reference.schema_id is not None:
         raise ValueError(f"{label} must be an evidence blob reference")
-    if require_blob_uri and _BLOB_URI.fullmatch(reference.uri) is None:
-        raise ValueError(f"{label} URI is invalid")
+    if require_blob_uri:
+        if _BLOB_URI.fullmatch(reference.uri) is None:
+            raise ValueError(f"{label} URI is invalid")
+        if reference.uri.rsplit("/", 1)[-1] != reference.sha256:
+            raise ValueError(f"{label} URI does not match its digest")
     return reference
 
 
