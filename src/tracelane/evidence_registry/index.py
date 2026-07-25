@@ -7,6 +7,7 @@ import os
 import re
 import stat
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
@@ -33,14 +34,14 @@ from tracelane.evidence_registry.reviews import (
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
     EvidenceRoot,
-    JsonPublicationReceipt,
+    JsonReplacementReceipt,
     _is_link_or_reparse,
     _secure_read,
+    commit_json_replacement,
     evidence_root_mutation_lock,
     read_json_object,
-    rollback_json_publication,
-    write_json_create_or_match,
-    write_json_create_or_match_receipt,
+    replace_json_publication,
+    rollback_json_replacement,
 )
 from tracelane.v2.contracts import ArtifactRef
 from tracelane.v2.schema import validate_document, validate_document_date
@@ -543,8 +544,8 @@ def _as_root(root: EvidenceRoot | str | Path) -> EvidenceRoot:
     try:
         path = root.path if isinstance(root, EvidenceRoot) else root
         return EvidenceRoot.open(path)
-    except (OSError, TypeError, ValueError) as exc:
-        raise ValueError("evidence root is invalid") from exc
+    except (OSError, TypeError, ValueError):
+        raise ValueError("evidence root is invalid") from None
 
 
 def _metadata(path: Path, label: str) -> os.stat_result:
@@ -905,8 +906,16 @@ def _validate_closure(
                     "date_precision": candidate.date_precision,
                     "source_type": candidate.source_type,
                     "role": candidate.role,
-                    "domains": list(candidate.domains),
-                    "fact_ids": list(candidate.fact_ids),
+                    "domains": list(
+                        current.approved_domains
+                        if current is not None and current.decision == "approved"
+                        else candidate.domains
+                    ),
+                    "fact_ids": list(
+                        current.approved_fact_ids
+                        if current is not None and current.decision == "approved"
+                        else candidate.fact_ids
+                    ),
                     "content_sha256": candidate.content_sha256,
                     "license_class": candidate.retention_policy,
                     "transformation_ids": sorted(transformation_ids),
@@ -1083,7 +1092,7 @@ def _reauthenticate_registry_state(
     return current
 
 
-def build_project_index(
+def _build_project_index(
     root: EvidenceRoot | str | Path,
     project_id: str,
 ) -> EvidenceProjectIndex:
@@ -1093,47 +1102,96 @@ def build_project_index(
     return final.expected_index
 
 
+def build_project_index(
+    root: EvidenceRoot | str | Path,
+    project_id: str,
+) -> EvidenceProjectIndex:
+    try:
+        return _build_project_index(root, project_id)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None
+    except (OSError, TypeError):
+        raise ValueError("evidence project index build failed") from None
+
+
 def rebuild_project_index(
     root: EvidenceRoot | str | Path,
     project_id: str,
 ) -> ArtifactRef:
-    authenticated_root = _as_root(root)
-    initial = _load_project_snapshot(authenticated_root, project_id)
-    final = _reauthenticate_project_snapshot(authenticated_root, initial)
-    reference = write_json_create_or_match(
-        authenticated_root,
-        _json_uri(project_id, "index", "index.json"),
-        "evidence_project_index",
-        _PROJECT_INDEX_SCHEMA,
-        final.expected_index.to_dict(),
-    )
-    _reauthenticate_project_snapshot(authenticated_root, initial)
-    return reference
+    return rebuild_evidence_indexes(root, project_id)[0]
 
 
-def build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
+def _build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
     authenticated_root = _as_root(root)
     initial = _derive_registry_once(authenticated_root)
     final = _reauthenticate_registry_state(authenticated_root, initial)
     return final[0]
 
 
+def build_registry(root: EvidenceRoot | str | Path) -> EvidenceRegistry:
+    try:
+        return _build_registry(root)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None
+    except (OSError, TypeError):
+        raise ValueError("evidence registry build failed") from None
+
+
+def _rebuild_registry(root: EvidenceRoot | str | Path) -> ArtifactRef:
+    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
+    with evidence_root_mutation_lock(root_path):
+        authenticated_root = _as_root(root_path)
+        initial = _derive_registry_once(authenticated_root)
+        final = _reauthenticate_registry_state(authenticated_root, initial)
+        receipt: JsonReplacementReceipt | None = None
+        try:
+            receipt = _publish_derived_json(
+                authenticated_root,
+                "tracelane://evidence/registry.json",
+                "evidence_registry",
+                _REGISTRY_SCHEMA,
+                final[0].to_dict(),
+            )
+            _reauthenticate_registry_state(authenticated_root, initial)
+            _read_registry(authenticated_root, final[0])
+        except (OSError, TypeError, ValueError):
+            if receipt is not None:
+                try:
+                    rollback_json_replacement(authenticated_root, receipt)
+                except (OSError, TypeError, ValueError):
+                    raise ValueError("evidence registry rollback failed") from None
+            raise ValueError("evidence registry publication failed") from None
+        with suppress(OSError, TypeError, ValueError):
+            commit_json_replacement(receipt)
+        return receipt.reference
+
+
 def rebuild_registry(root: EvidenceRoot | str | Path) -> ArtifactRef:
-    authenticated_root = _as_root(root)
-    initial = _derive_registry_once(authenticated_root)
-    final = _reauthenticate_registry_state(authenticated_root, initial)
-    reference = write_json_create_or_match(
-        authenticated_root,
-        "tracelane://evidence/registry.json",
-        "evidence_registry",
-        _REGISTRY_SCHEMA,
-        final[0].to_dict(),
+    try:
+        return _rebuild_registry(root)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None
+    except (OSError, TypeError):
+        raise ValueError("evidence registry rebuild failed") from None
+
+
+def _publish_derived_json(
+    root: EvidenceRoot,
+    uri: str,
+    kind: str,
+    schema_id: str,
+    value: Mapping[str, object],
+) -> JsonReplacementReceipt:
+    return replace_json_publication(
+        root,
+        uri,
+        kind,
+        schema_id,
+        value,
     )
-    _reauthenticate_registry_state(authenticated_root, initial)
-    return reference
 
 
-def rebuild_evidence_indexes(
+def _rebuild_evidence_indexes(
     root: EvidenceRoot | str | Path,
     project_id: str,
 ) -> tuple[ArtifactRef, ArtifactRef]:
@@ -1145,19 +1203,7 @@ def rebuild_evidence_indexes(
     with evidence_root_mutation_lock(root_path):
         authenticated_root = _as_root(root_path)
         index_uri = _json_uri(project_id, "index", "index.json")
-        index_path = authenticated_root.resolve(index_uri)
         registry_uri = "tracelane://evidence/registry.json"
-        registry_path = authenticated_root.resolve(registry_uri)
-        index_exists = index_path.exists()
-        registry_exists = registry_path.exists()
-        if index_exists != registry_exists:
-            raise ValueError("evidence derived state conflicts")
-        if index_exists:
-            snapshots, index_refs, registry_ref = _verified_state(authenticated_root)
-            if not any(snapshot.project.project_id == project_id for snapshot in snapshots):
-                raise ValueError("evidence rebuild request is invalid")
-            return index_refs[project_id], registry_ref
-
         initial_project = _load_project_snapshot(
             authenticated_root,
             project_id,
@@ -1188,8 +1234,6 @@ def rebuild_evidence_indexes(
             _REGISTRY_SCHEMA,
             final_registry[0].to_dict(),
         )
-        if index_path.exists() or registry_path.exists():
-            raise ValueError("evidence derived state changed")
         _reauthenticate_project_snapshot(
             authenticated_root,
             initial_project,
@@ -1200,9 +1244,9 @@ def rebuild_evidence_indexes(
             overrides,
         )
 
-        created: list[JsonPublicationReceipt] = []
+        receipts: list[JsonReplacementReceipt] = []
         try:
-            published_index = write_json_create_or_match_receipt(
+            published_index = _publish_derived_json(
                 authenticated_root,
                 index_uri,
                 "evidence_project_index",
@@ -1211,9 +1255,13 @@ def rebuild_evidence_indexes(
             )
             if published_index.reference != index_ref:
                 raise ValueError("project index publication changed")
-            if published_index.created_by_this_call:
-                created.append(published_index)
-            published_registry = write_json_create_or_match_receipt(
+            receipts.append(published_index)
+            _reauthenticate_registry_state(
+                authenticated_root,
+                initial_registry,
+                overrides,
+            )
+            published_registry = _publish_derived_json(
                 authenticated_root,
                 registry_uri,
                 "evidence_registry",
@@ -1222,8 +1270,7 @@ def rebuild_evidence_indexes(
             )
             if published_registry.reference != registry_ref:
                 raise ValueError("evidence registry publication changed")
-            if published_registry.created_by_this_call:
-                created.append(published_registry)
+            receipts.append(published_registry)
             verified = verify_evidence_registry(
                 authenticated_root,
                 project_id,
@@ -1233,17 +1280,32 @@ def rebuild_evidence_indexes(
                 or verified.registry_sha256 != registry_ref.sha256
             ):
                 raise ValueError("evidence derived verification changed")
-            return index_ref, registry_ref
         except (OSError, TypeError, ValueError):
             rollback_failed = False
-            for receipt in reversed(created):
+            for receipt in reversed(receipts):
                 try:
-                    rollback_json_publication(authenticated_root, receipt)
+                    rollback_json_replacement(authenticated_root, receipt)
                 except (OSError, TypeError, ValueError):
                     rollback_failed = True
             if rollback_failed:
                 raise ValueError("evidence derived rollback failed") from None
             raise ValueError("evidence derived publication failed") from None
+        for receipt in receipts:
+            with suppress(OSError, TypeError, ValueError):
+                commit_json_replacement(receipt)
+        return index_ref, registry_ref
+
+
+def rebuild_evidence_indexes(
+    root: EvidenceRoot | str | Path,
+    project_id: str,
+) -> tuple[ArtifactRef, ArtifactRef]:
+    try:
+        return _rebuild_evidence_indexes(root, project_id)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None
+    except (OSError, TypeError):
+        raise ValueError("evidence rebuild failed") from None
 
 
 def _read_registry(
@@ -1283,7 +1345,7 @@ def _verified_state(
     return final[1], final[2], final_registry_ref
 
 
-def verify_evidence_registry(
+def _verify_evidence_registry(
     root: EvidenceRoot | str | Path,
     project_id: str | None = None,
 ) -> VerificationReport:
@@ -1318,6 +1380,18 @@ def verify_evidence_registry(
         registry_sha256=registry_ref.sha256,
         project_index_sha256=project_index_sha256,
     )
+
+
+def verify_evidence_registry(
+    root: EvidenceRoot | str | Path,
+    project_id: str | None = None,
+) -> VerificationReport:
+    try:
+        return _verify_evidence_registry(root, project_id)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None
+    except (OSError, TypeError):
+        raise ValueError("evidence verification failed") from None
 
 
 def _date_interval(value: str) -> tuple[date, date]:
@@ -1374,7 +1448,7 @@ def _validated_query(
         raise ValueError("evidence query is invalid") from exc
 
 
-def find_evidence(
+def _find_evidence(
     root: EvidenceRoot | str | Path,
     query: EvidenceQuery,
 ) -> tuple[EvidenceIndexEntry, ...]:
@@ -1406,3 +1480,15 @@ def find_evidence(
             continue
         values.append(entry)
     return tuple(values)
+
+
+def find_evidence(
+    root: EvidenceRoot | str | Path,
+    query: EvidenceQuery,
+) -> tuple[EvidenceIndexEntry, ...]:
+    try:
+        return _find_evidence(root, query)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None
+    except (OSError, TypeError):
+        raise ValueError("evidence query failed") from None

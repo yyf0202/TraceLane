@@ -18,14 +18,23 @@ from tracelane.evidence_registry import (
     EvidenceProject,
     import_acquisition_project,
 )
-from tracelane.hist001 import (
-    HIST001_CURATOR,
-    HIST001_RETRIEVED_AT,
-    HIST001_SESSION_ID,
-    HIST001_SOURCE_MANIFEST,
-)
 from tracelane.v2.contracts import ArtifactRef, content_digest
 from tracelane.v2.storage import secure_read_bytes
+
+if __package__:
+    from .hist001_manifest import (
+        HIST001_CURATOR,
+        HIST001_RETRIEVED_AT,
+        HIST001_SESSION_ID,
+        HIST001_SOURCE_MANIFEST,
+    )
+else:
+    from hist001_manifest import (  # type: ignore[import-not-found]
+        HIST001_CURATOR,
+        HIST001_RETRIEVED_AT,
+        HIST001_SESSION_ID,
+        HIST001_SOURCE_MANIFEST,
+    )
 
 _REQUIRED_DOMAINS = frozenset(domain for spec in HIST001_SOURCE_MANIFEST for domain in spec.domains)
 

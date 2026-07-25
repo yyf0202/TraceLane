@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import re
 import shutil
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,18 +34,17 @@ from tracelane.evidence_registry.index import (
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
     EvidenceRoot,
-    evidence_root_identity,
+    JsonReplacementReceipt,
+    commit_json_replacement,
     evidence_root_mutation_lock,
+    replace_json_publication,
+    rollback_json_replacement,
     write_json_create_or_match,
 )
 from tracelane.security import classify_and_redact
 from tracelane.v2.contracts import ArtifactRef, content_digest
 from tracelane.v2.schema import validate_document
-from tracelane.v2.storage import (
-    ArtifactRoot,
-    atomic_write_bytes,
-    secure_read_bytes,
-)
+from tracelane.v2.storage import ArtifactRoot, secure_read_bytes
 
 _PROJECT_SCHEMA = "tracelane://schemas/evidence-project/v1"
 _CANDIDATE_SCHEMA = "tracelane://schemas/project-evidence-candidate/v1"
@@ -342,8 +343,15 @@ def _build_staged_project(
 
 def _staging_location(target: Path) -> tuple[Path, Path]:
     namespace = ArtifactRoot(target.parent / ".tracelane-staging").path
-    prefix = f"{target.name}-{evidence_root_identity(target)}-"
+    prefix = _staging_prefix(target)
     return namespace, namespace / f"{prefix}{uuid.uuid4().hex}"
+
+
+def _staging_prefix(target: Path) -> str:
+    stable_name = hashlib.sha256(
+        os.path.normcase(os.path.normpath(str(target))).encode("utf-8")
+    ).hexdigest()[:24]
+    return f"{target.name}-{stable_name}-"
 
 
 def _safe_remove_stage(
@@ -352,7 +360,7 @@ def _safe_remove_stage(
     target: Path,
 ) -> None:
     expected_namespace = target.parent / ".tracelane-staging"
-    prefix = f"{target.name}-{evidence_root_identity(target)}-"
+    prefix = _staging_prefix(target)
     suffix = stage_path.name.removeprefix(prefix)
     if (
         staging_namespace != expected_namespace
@@ -451,46 +459,19 @@ def _preflight_existing_target(
     return root, False
 
 
-def _publish_registry(root: EvidenceRoot) -> ArtifactRef:
+def _publish_registry(root: EvidenceRoot) -> JsonReplacementReceipt:
     expected = build_registry(root)
     expected_bytes = _canonical_bytes(expected.to_dict())
     registry_path = root.resolve("tracelane://evidence/registry.json")
-    if not registry_path.exists():
-        return write_json_create_or_match(
+    receipt = None
+    try:
+        receipt = replace_json_publication(
             root,
             "tracelane://evidence/registry.json",
             "evidence_registry",
             _REGISTRY_SCHEMA,
             expected.to_dict(),
         )
-    try:
-        current = secure_read_bytes(
-            registry_path,
-            root=root.path,
-            label="evidence import registry",
-        )
-        value = json.loads(current.decode("utf-8"))
-        if not isinstance(value, dict):
-            raise ValueError("registry must be an object")
-        parsed = EvidenceRegistry.from_dict(value)
-        if current != _canonical_bytes(parsed.to_dict()):
-            raise ValueError("registry is not canonical")
-        if current != expected_bytes:
-            if (
-                secure_read_bytes(
-                    registry_path,
-                    root=root.path,
-                    label="evidence import registry",
-                )
-                != current
-            ):
-                raise ValueError("registry changed before repair")
-            atomic_write_bytes(
-                registry_path,
-                expected_bytes,
-                root=root.path,
-                label="evidence import registry",
-            )
         published = secure_read_bytes(
             registry_path,
             root=root.path,
@@ -504,18 +485,82 @@ def _publish_registry(root: EvidenceRoot) -> ArtifactRef:
             or build_registry(root) != expected
         ):
             raise ValueError("registry publication is invalid")
-        return ArtifactRef.from_dict(
-            {
-                "kind": "evidence_registry",
-                "uri": "tracelane://evidence/registry.json",
-                "media_type": "application/json",
-                "schema_id": _REGISTRY_SCHEMA,
-                "sha256": hashlib.sha256(published).hexdigest(),
-                "size_bytes": len(published),
-            }
-        )
     except (OSError, TypeError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        if receipt is not None:
+            try:
+                rollback_json_replacement(root, receipt)
+            except (OSError, TypeError, ValueError):
+                raise ValueError("evidence import target is invalid") from None
         raise ValueError("evidence import target is invalid") from exc
+    return receipt
+
+
+def _publish_project_directory_no_replace(source: Path, target: Path) -> None:
+    source = Path(source)
+    target = Path(target)
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        move_file_ex = kernel32.MoveFileExW
+        move_file_ex.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_wchar_p,
+            ctypes.c_ulong,
+        ]
+        move_file_ex.restype = ctypes.c_int
+        if not move_file_ex(str(source), str(target), 0):
+            error = ctypes.get_last_error()
+            if target.exists() or target.is_symlink():
+                raise FileExistsError(error, "project destination already exists")
+            raise OSError(error, "project directory publication failed")
+        return
+
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is not None:
+        renameat2.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renameat2.restype = ctypes.c_int
+        encoded_source = os.fsencode(source)
+        encoded_target = os.fsencode(target)
+        if (
+            renameat2(
+                -100,
+                encoded_source,
+                -100,
+                encoded_target,
+                1,
+            )
+            != 0
+        ):
+            error = ctypes.get_errno()
+            if error == errno.EEXIST:
+                raise FileExistsError(error, "project destination already exists")
+            raise OSError(error, "project directory publication failed")
+        return
+    renamex_np = getattr(libc, "renamex_np", None)
+    if renamex_np is not None:
+        renamex_np.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renamex_np.restype = ctypes.c_int
+        if renamex_np(os.fsencode(source), os.fsencode(target), 0x00000004) != 0:
+            error = ctypes.get_errno()
+            if error == errno.EEXIST:
+                raise FileExistsError(error, "project destination already exists")
+            raise OSError(error, "project directory publication failed")
+        return
+    raise OSError(errno.ENOTSUP, "atomic no-replace directory publication is unavailable")
 
 
 def _import_acquisition_project(
@@ -532,6 +577,7 @@ def _import_acquisition_project(
     service, authenticated = _authenticate_source(source_path, metadata)
     with evidence_root_mutation_lock(target_path):
         staging_namespace, stage_path = _staging_location(target_path)
+        committed_report: EvidenceImportReport | None = None
         try:
             stage, expected_index = _build_staged_project(
                 stage_path,
@@ -565,6 +611,12 @@ def _import_acquisition_project(
 
             final_project = target.path / "projects" / project.project_id
             target.ensure_parent(final_project)
+            _assert_source_unchanged(
+                service,
+                source_path,
+                authenticated,
+                metadata.session_id,
+            )
             if project_exists:
                 _authenticate_existing_project(
                     target,
@@ -573,7 +625,7 @@ def _import_acquisition_project(
                 )
             else:
                 try:
-                    os.rename(
+                    _publish_project_directory_no_replace(
                         stage.path / "projects" / project.project_id,
                         final_project,
                     )
@@ -584,49 +636,45 @@ def _import_acquisition_project(
                     project,
                     expected_index,
                 )
-            _assert_source_unchanged(
-                service,
-                source_path,
-                authenticated,
-                metadata.session_id,
-            )
-            _publish_registry(target)
-            _assert_source_unchanged(
-                service,
-                source_path,
-                authenticated,
-                metadata.session_id,
-            )
-            verified = verify_evidence_registry(target, project.project_id)
-            if verified.project_index_sha256 is None:
-                raise ValueError("evidence import target is invalid")
-            _assert_source_unchanged(
-                service,
-                source_path,
-                authenticated,
-                metadata.session_id,
-            )
-            return EvidenceImportReport(
-                project_id=project.project_id,
-                candidate_count=len(authenticated.closures),
-                pending_count=expected_index.status_counts["pending"],
-                future_control_count=sum(
-                    item.role == "future-control" for item in expected_index.entries
-                ),
-                source_manifest_sha256=authenticated.manifest_sha256,
-                project_index_sha256=verified.project_index_sha256,
-                registry_sha256=verified.registry_sha256,
-                source_candidate_ids=tuple(
-                    item.candidate.candidate_id for item in authenticated.closures
-                ),
-            )
+            registry_receipt = _publish_registry(target)
+            try:
+                verified = verify_evidence_registry(target, project.project_id)
+                if verified.project_index_sha256 is None:
+                    raise ValueError("evidence import target is invalid")
+                committed_report = EvidenceImportReport(
+                    project_id=project.project_id,
+                    candidate_count=len(authenticated.closures),
+                    pending_count=expected_index.status_counts["pending"],
+                    future_control_count=sum(
+                        item.role == "future-control" for item in expected_index.entries
+                    ),
+                    source_manifest_sha256=authenticated.manifest_sha256,
+                    project_index_sha256=verified.project_index_sha256,
+                    registry_sha256=verified.registry_sha256,
+                    source_candidate_ids=tuple(
+                        item.candidate.candidate_id for item in authenticated.closures
+                    ),
+                )
+            except (OSError, TypeError, ValueError):
+                try:
+                    rollback_json_replacement(target, registry_receipt)
+                except (OSError, TypeError, ValueError):
+                    raise ValueError("evidence import target is invalid") from None
+                raise
+            with suppress(OSError, TypeError, ValueError):
+                commit_json_replacement(registry_receipt)
+            return committed_report
         finally:
             if stage_path.exists() or stage_path.is_symlink():
-                _safe_remove_stage(
-                    stage_path,
-                    staging_namespace,
-                    target_path,
-                )
+                try:
+                    _safe_remove_stage(
+                        stage_path,
+                        staging_namespace,
+                        target_path,
+                    )
+                except ValueError:
+                    if committed_report is None:
+                        raise
 
 
 def import_acquisition_project(

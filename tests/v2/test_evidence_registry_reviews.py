@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
 from tracelane.acquisition.contracts import compute_candidate_id
 from tracelane.evidence_registry.contracts import (
+    EvidenceProject,
     ProjectEvidenceCandidate,
     candidate_record_digest,
 )
@@ -18,7 +21,11 @@ from tracelane.evidence_registry.reviews import (
     effective_status,
     validate_review_chain,
 )
-from tracelane.evidence_registry.storage import EvidenceRoot
+from tracelane.evidence_registry.storage import (
+    EvidenceBlobStore,
+    EvidenceRoot,
+    write_json_create_or_match,
+)
 from tracelane.v2.contracts import ArtifactRef, make_object_id
 from tracelane.v2.schema import SchemaValidationError, validate_document
 
@@ -114,6 +121,44 @@ def _revised_candidate(
     value.update(changes)
     value["record_sha256"] = candidate_record_digest(value)
     return ProjectEvidenceCandidate.from_dict(value)
+
+
+def _published_candidate_root(
+    path: Path,
+    candidate: ProjectEvidenceCandidate | None,
+) -> EvidenceRoot:
+    root = EvidenceRoot.create(path)
+    project = EvidenceProject.create(
+        project_id="hist-001",
+        title="HIST-001",
+        research_question="What evidence supports the counterfactual?",
+        historical_cutoff_at=datetime(1812, 6, 23, 23, 59, 59, tzinfo=UTC),
+        intervention="Napoleon does not cross the Niemen.",
+        required_domains=("logistics", "military"),
+        admitted_source_types=("primary",),
+        status="active",
+    )
+    write_json_create_or_match(
+        root,
+        "tracelane://evidence/projects/hist-001/project.json",
+        "evidence_project",
+        "tracelane://schemas/evidence-project/v1",
+        project.to_dict(),
+    )
+    if candidate is not None:
+        EvidenceBlobStore(root).put_bytes(
+            b"curated evidence",
+            "text/plain",
+            "evidence_blob",
+        )
+        write_json_create_or_match(
+            root,
+            (f"tracelane://evidence/projects/hist-001/candidates/{candidate.candidate_id}.json"),
+            "evidence_candidate",
+            "tracelane://schemas/project-evidence-candidate/v1",
+            candidate.to_dict(),
+        )
+    return root
 
 
 def test_no_review_is_pending(candidate: ProjectEvidenceCandidate) -> None:
@@ -612,7 +657,7 @@ def test_first_review_schema_omits_predecessor_and_later_review_requires_it(
 def test_append_review_is_idempotent_and_uses_exact_uri(
     tmp_path, approved_review: EvidenceReview
 ) -> None:
-    root = EvidenceRoot.create(tmp_path / "evidence")
+    root = _published_candidate_root(tmp_path / "evidence", _candidate())
 
     first = append_review(root, approved_review)
     second = append_review(root, approved_review)
@@ -629,14 +674,109 @@ def test_append_review_is_idempotent_and_uses_exact_uri(
 def test_append_review_never_replaces_existing_different_bytes(
     tmp_path, approved_review: EvidenceReview
 ) -> None:
-    root = EvidenceRoot.create(tmp_path / "evidence")
+    root = _published_candidate_root(tmp_path / "evidence", _candidate())
     uri = f"tracelane://evidence/projects/hist-001/reviews/{approved_review.review_id}.json"
     target = root.resolve(uri)
     target.parent.mkdir(parents=True)
     original = b'{"different":true}\n'
     target.write_bytes(original)
 
-    with pytest.raises(ValueError, match="conflict"):
+    with pytest.raises(ValueError, match="source is invalid|conflict"):
         append_review(root, approved_review)
 
     assert target.read_bytes() == original
+
+
+def test_append_review_rejects_orphan_project_and_candidate(
+    tmp_path: Path,
+    approved_review: EvidenceReview,
+) -> None:
+    missing_project = EvidenceRoot.create(tmp_path / "missing-project")
+    project_only = _published_candidate_root(tmp_path / "project-only", None)
+
+    for root in (missing_project, project_only):
+        with pytest.raises(ValueError, match="review append source is invalid"):
+            append_review(root, approved_review)
+
+    assert not list(missing_project.path.rglob("*.json"))
+    assert not list((project_only.path / "projects" / "hist-001" / "reviews").glob("*.json"))
+
+
+def test_append_review_rejects_stale_candidate_binding(
+    tmp_path: Path,
+    candidate: ProjectEvidenceCandidate,
+    approved_review: EvidenceReview,
+) -> None:
+    revised = _revised_candidate(candidate, license_basis="Revised license basis.")
+    root = _published_candidate_root(tmp_path / "evidence", revised)
+
+    with pytest.raises(ValueError, match="review append candidate is stale"):
+        append_review(root, approved_review)
+
+    assert not list((root.path / "projects" / "hist-001" / "reviews").glob("*.json"))
+
+
+def test_append_review_rejects_non_head_predecessor(
+    tmp_path: Path,
+    candidate: ProjectEvidenceCandidate,
+    approved_review: EvidenceReview,
+) -> None:
+    root = _published_candidate_root(tmp_path / "evidence", candidate)
+    append_review(root, approved_review)
+    second = _review(
+        candidate,
+        decision="rejected",
+        reviewed_at=datetime(2026, 7, 25, 9, 0, tzinfo=UTC),
+        supersedes_review_id=approved_review.review_id,
+    )
+    append_review(root, second)
+    fork = _review(
+        candidate,
+        decision="superseded",
+        reviewed_at=datetime(2026, 7, 25, 10, 0, tzinfo=UTC),
+        supersedes_review_id=approved_review.review_id,
+    )
+
+    with pytest.raises(ValueError, match="review append predecessor is not the current head"):
+        append_review(root, fork)
+
+    assert len(list((root.path / "projects" / "hist-001" / "reviews").glob("*.json"))) == 2
+
+
+def test_concurrent_same_head_review_append_has_one_winner(
+    tmp_path: Path,
+    candidate: ProjectEvidenceCandidate,
+    approved_review: EvidenceReview,
+) -> None:
+    root = _published_candidate_root(tmp_path / "evidence", candidate)
+    append_review(root, approved_review)
+    proposed = (
+        _review(
+            candidate,
+            decision="rejected",
+            reason="First competing decision.",
+            reviewed_at=datetime(2026, 7, 25, 9, 0, tzinfo=UTC),
+            supersedes_review_id=approved_review.review_id,
+        ),
+        _review(
+            candidate,
+            decision="superseded",
+            reason="Second competing decision.",
+            reviewed_at=datetime(2026, 7, 25, 9, 1, tzinfo=UTC),
+            supersedes_review_id=approved_review.review_id,
+        ),
+    )
+
+    def publish(review: EvidenceReview) -> str:
+        try:
+            append_review(root, review)
+        except ValueError as exc:
+            return str(exc)
+        return "published"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = tuple(executor.map(publish, proposed))
+
+    assert outcomes.count("published") == 1
+    assert outcomes.count("review append predecessor is not the current head") == 1
+    assert len(list((root.path / "projects" / "hist-001" / "reviews").glob("*.json"))) == 2

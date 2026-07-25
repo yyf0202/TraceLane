@@ -5,8 +5,9 @@ import json
 import os
 import re
 import stat
+import uuid
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from tracelane.v2.storage import (
     ArtifactRoot,
     atomic_create_bytes,
     atomic_create_bytes_with_identity,
+    atomic_move_no_replace,
+    retire_authenticated_file,
     secure_read_bytes,
 )
 
@@ -27,21 +30,48 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _URI_COMPONENT = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
 
+def _evidence_root_parent_identity(target: Path) -> str:
+    try:
+        parent = target.parent.lstat()
+    except OSError as exc:
+        raise ValueError("evidence mutation lock root is unavailable") from exc
+    if _is_link_or_reparse(parent) or not stat.S_ISDIR(parent.st_mode):
+        raise ValueError("evidence mutation lock root is unavailable")
+    identity = f"parent:{parent.st_dev}:{parent.st_ino}:{os.path.normcase(target.name)}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+
+
 def evidence_root_identity(target: str | Path) -> str:
     normalized = _absolute(target)
-    return hashlib.sha256(
-        os.path.normcase(os.path.normpath(str(normalized))).encode("utf-8")
-    ).hexdigest()[:24]
+    try:
+        metadata = normalized.lstat()
+    except FileNotFoundError:
+        return _evidence_root_parent_identity(normalized)
+    except OSError as exc:
+        raise ValueError("evidence mutation lock root is unavailable") from exc
+    if _is_link_or_reparse(metadata) or not stat.S_ISDIR(metadata.st_mode):
+        raise ValueError("evidence mutation lock root is unavailable")
+    identity = f"existing:{metadata.st_dev}:{metadata.st_ino}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
 
 @contextmanager
 def evidence_root_mutation_lock(target: str | Path) -> Iterator[None]:
     normalized = _absolute(target)
     lock_root = ArtifactRoot(normalized.parent / ".tracelane-locks")
-    lock_path = (
-        lock_root.path / ".locks" / f"evidence-import-{evidence_root_identity(normalized)}.lock"
-    )
-    with exclusive_file_lock(lock_path, blocking=True):
+    lock_identities = {_evidence_root_parent_identity(normalized)}
+    try:
+        normalized.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise ValueError("evidence mutation lock root is unavailable") from exc
+    else:
+        lock_identities.add(evidence_root_identity(normalized))
+    with ExitStack() as stack:
+        for lock_identity in sorted(lock_identities):
+            lock_path = lock_root.path / ".locks" / f"evidence-import-{lock_identity}.lock"
+            stack.enter_context(exclusive_file_lock(lock_path, blocking=True))
         yield
 
 
@@ -524,7 +554,10 @@ class EvidenceRoot:
     @classmethod
     def open(cls, path: str | Path) -> EvidenceRoot:
         supplied = _absolute(path)
-        metadata = _validate_root_tree(supplied)
+        try:
+            metadata = _validate_root_tree(supplied)
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError(str(exc)) from None
         return cls(path=supplied, _opened_identity=_identity(metadata))
 
     @classmethod
@@ -677,6 +710,17 @@ class JsonPublicationReceipt:
     filesystem_identity: tuple[int, int]
 
 
+@dataclass(frozen=True)
+class JsonReplacementReceipt:
+    reference: ArtifactRef
+    changed_by_this_call: bool
+    published_data: bytes
+    published_identity: tuple[int, int]
+    previous_data: bytes | None
+    previous_identity: tuple[int, int] | None
+    backup_path: Path | None
+
+
 class EvidenceBlobStore:
     def __init__(self, root: EvidenceRoot) -> None:
         if not isinstance(root, EvidenceRoot):
@@ -784,8 +828,14 @@ def rollback_json_publication(
     ):
         raise ValueError("evidence JSON rollback target changed")
     try:
-        os.unlink(target)
-    except OSError as exc:
+        retire_authenticated_file(
+            target,
+            data,
+            expected_identity=receipt.filesystem_identity,
+            root=root.path,
+            label="evidence JSON rollback",
+        )
+    except (OSError, TypeError, ValueError) as exc:
         raise ValueError("evidence JSON rollback failed") from exc
     if target.exists() or target.is_symlink():
         raise ValueError("evidence JSON rollback failed")
@@ -884,7 +934,253 @@ def write_json_create_or_match(
     ).reference
 
 
-def read_json_object(
+def _restore_json_backup(
+    root: EvidenceRoot,
+    receipt: JsonReplacementReceipt,
+) -> None:
+    if (
+        receipt.backup_path is None
+        or receipt.previous_data is None
+        or receipt.previous_identity is None
+    ):
+        return
+    target = root.resolve(receipt.reference.uri)
+    backup = receipt.backup_path
+    if target.exists() or target.is_symlink():
+        raise ValueError("evidence JSON replacement target was claimed")
+    try:
+        backup_data = secure_read_bytes(
+            backup,
+            root=backup.parent,
+            label="evidence JSON replacement backup",
+        )
+        backup_identity = _identity(backup.lstat())
+        if backup_data != receipt.previous_data or backup_identity != receipt.previous_identity:
+            raise ValueError("evidence JSON replacement backup changed")
+        os.link(backup, target)
+        published = target.lstat()
+        if _identity(published) != receipt.previous_identity:
+            raise ValueError("evidence JSON replacement restore changed")
+        backup.unlink()
+        restored = target.lstat()
+        if (
+            _identity(restored) != receipt.previous_identity
+            or secure_read_bytes(
+                target,
+                root=root.path,
+                label="evidence JSON replacement restore",
+            )
+            != receipt.previous_data
+        ):
+            raise ValueError("evidence JSON replacement restore changed")
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("evidence JSON replacement restore failed") from exc
+
+
+def replace_json_publication(
+    root: EvidenceRoot,
+    uri: str,
+    kind: str,
+    schema_id: str,
+    value: Mapping[str, object],
+) -> JsonReplacementReceipt:
+    if not isinstance(root, EvidenceRoot) or not isinstance(value, Mapping):
+        raise ValueError("evidence JSON replacement is invalid")
+    try:
+        data = canonical_json(value).encode("utf-8") + b"\n"
+        reference = ArtifactRef.from_dict(
+            {
+                "kind": kind,
+                "uri": uri,
+                "media_type": "application/json",
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "size_bytes": len(data),
+                "schema_id": schema_id,
+            }
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("evidence JSON replacement is invalid") from exc
+    target = root.resolve(uri)
+    root.ensure_parent(target)
+    target = root.resolve(uri)
+    try:
+        previous_data, previous_identity = _read_json_publication_identity(
+            target,
+            root,
+        )
+    except ValueError:
+        if target.exists() or target.is_symlink():
+            raise ValueError("evidence JSON replacement target is invalid") from None
+        previous_data = None
+        previous_identity = None
+    if previous_data == data:
+        assert previous_identity is not None
+        return JsonReplacementReceipt(
+            reference=reference,
+            changed_by_this_call=False,
+            published_data=data,
+            published_identity=previous_identity,
+            previous_data=previous_data,
+            previous_identity=previous_identity,
+            backup_path=None,
+        )
+
+    backup: Path | None = None
+    if previous_data is not None:
+        assert previous_identity is not None
+        backup_root = ArtifactRoot(root.path.parent / ".tracelane-staging")
+        backup = backup_root.path / (
+            f"{root.path.name}-{evidence_root_identity(root.path)}-{uuid.uuid4().hex}.json-backup"
+        )
+        confirmed_data, confirmed_identity = _read_json_publication_identity(
+            target,
+            root,
+        )
+        if confirmed_data != previous_data or confirmed_identity != previous_identity:
+            raise ValueError("evidence JSON replacement target changed")
+        try:
+            atomic_move_no_replace(
+                target,
+                backup,
+                label="evidence JSON replacement backup",
+            )
+            moved_data = secure_read_bytes(
+                backup,
+                root=backup.parent,
+                label="evidence JSON replacement backup",
+            )
+            moved_identity = _identity(backup.lstat())
+            if moved_data != previous_data or moved_identity != previous_identity:
+                if not target.exists() and not target.is_symlink():
+                    os.link(backup, target)
+                    backup.unlink()
+                raise ValueError("evidence JSON replacement target changed")
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError("evidence JSON replacement target changed") from exc
+    try:
+        published_identity = atomic_create_bytes_with_identity(
+            target,
+            data,
+            root=root.path,
+            label="evidence JSON replacement",
+        )
+        receipt = JsonReplacementReceipt(
+            reference=reference,
+            changed_by_this_call=True,
+            published_data=data,
+            published_identity=published_identity,
+            previous_data=previous_data,
+            previous_identity=previous_identity,
+            backup_path=backup,
+        )
+        read_json_object(
+            root,
+            reference,
+            expected_kind=kind,
+            expected_schema_id=schema_id,
+        )
+        confirmed_data, confirmed_identity = _read_json_publication_identity(
+            target,
+            root,
+        )
+        if confirmed_data != data or confirmed_identity != published_identity:
+            raise ValueError("evidence JSON replacement publication changed")
+        return receipt
+    except (OSError, TypeError, ValueError) as exc:
+        if target.exists() or target.is_symlink():
+            try:
+                current_data, current_identity = _read_json_publication_identity(
+                    target,
+                    root,
+                )
+                if (
+                    current_data == data
+                    and "published_identity" in locals()
+                    and current_identity == published_identity
+                ):
+                    retire_authenticated_file(
+                        target,
+                        data,
+                        expected_identity=published_identity,
+                        root=root.path,
+                        label="evidence JSON replacement rollback",
+                    )
+            except (OSError, TypeError, ValueError):
+                pass
+        if backup is not None and not target.exists() and not target.is_symlink():
+            provisional = JsonReplacementReceipt(
+                reference=reference,
+                changed_by_this_call=True,
+                published_data=data,
+                published_identity=(
+                    published_identity if "published_identity" in locals() else (-1, -1)
+                ),
+                previous_data=previous_data,
+                previous_identity=previous_identity,
+                backup_path=backup,
+            )
+            _restore_json_backup(root, provisional)
+        raise ValueError("evidence JSON replacement failed") from exc
+
+
+def rollback_json_replacement(
+    root: EvidenceRoot,
+    receipt: JsonReplacementReceipt,
+) -> None:
+    if not isinstance(root, EvidenceRoot) or not isinstance(
+        receipt,
+        JsonReplacementReceipt,
+    ):
+        raise ValueError("evidence JSON replacement receipt is invalid")
+    if not receipt.changed_by_this_call:
+        return
+    target = root.resolve(receipt.reference.uri, must_exist=True)
+    try:
+        data, identity = _read_json_publication_identity(target, root)
+        if data != receipt.published_data or identity != receipt.published_identity:
+            raise ValueError("evidence JSON replacement target changed")
+        retire_authenticated_file(
+            target,
+            receipt.published_data,
+            expected_identity=receipt.published_identity,
+            root=root.path,
+            label="evidence JSON replacement rollback",
+        )
+        _restore_json_backup(root, receipt)
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("evidence JSON replacement rollback failed") from exc
+
+
+def commit_json_replacement(
+    receipt: JsonReplacementReceipt,
+) -> None:
+    if not isinstance(receipt, JsonReplacementReceipt):
+        raise ValueError("evidence JSON replacement receipt is invalid")
+    if receipt.backup_path is None:
+        return
+    if receipt.previous_data is None or receipt.previous_identity is None:
+        raise ValueError("evidence JSON replacement receipt is invalid")
+    try:
+        backup_data = secure_read_bytes(
+            receipt.backup_path,
+            root=receipt.backup_path.parent,
+            label="evidence JSON replacement backup",
+        )
+        backup_identity = _identity(receipt.backup_path.lstat())
+        if backup_data != receipt.previous_data or backup_identity != receipt.previous_identity:
+            raise ValueError("evidence JSON replacement backup changed")
+        retire_authenticated_file(
+            receipt.backup_path,
+            receipt.previous_data,
+            expected_identity=receipt.previous_identity,
+            root=receipt.backup_path.parent,
+            label="evidence JSON replacement backup",
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("evidence JSON replacement cleanup failed") from exc
+
+
+def _read_json_object(
     root: EvidenceRoot,
     reference: ArtifactRef,
     *,
@@ -920,3 +1216,23 @@ def read_json_object(
     if data != expected_data:
         raise ValueError("evidence JSON is not canonical")
     return parsed
+
+
+def read_json_object(
+    root: EvidenceRoot,
+    reference: ArtifactRef,
+    *,
+    expected_kind: str,
+    expected_schema_id: str,
+) -> dict[str, object]:
+    try:
+        return _read_json_object(
+            root,
+            reference,
+            expected_kind=expected_kind,
+            expected_schema_id=expected_schema_id,
+        )
+    except ValueError as exc:
+        raise ValueError(str(exc)) from None
+    except (OSError, TypeError):
+        raise ValueError("evidence JSON read failed") from None

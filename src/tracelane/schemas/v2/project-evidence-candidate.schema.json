@@ -106,6 +106,12 @@
           "properties": {
             "kind": {
               "const": "evidence_transformation"
+            },
+            "uri": {
+              "pattern": "^tracelane://evidence/projects/[a-z][a-z0-9-]{2,63}/transformations/transformation_[0-9a-f]{24}\\.json$"
+            },
+            "media_type": {
+              "const": "application/json"
             }
           }
         },

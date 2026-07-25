@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
+import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,6 +25,7 @@ from tracelane.evidence_registry.index import (
     build_project_index,
     build_registry,
     find_evidence,
+    rebuild_evidence_indexes,
     rebuild_project_index,
     rebuild_registry,
     verify_evidence_registry,
@@ -201,6 +204,153 @@ def test_deleted_indexes_rebuild_byte_identically(registry_root: EvidenceRoot) -
     assert registry_path.read_bytes() == registry_bytes
 
 
+def test_review_append_then_rebuild_replaces_stale_derived_state(
+    registry_root: EvidenceRoot,
+) -> None:
+    candidate_path = _candidate_path_for_fact(registry_root, "fact.1")
+    candidate = ProjectEvidenceCandidate.from_dict(
+        json.loads(candidate_path.read_text(encoding="utf-8"))
+    )
+    review = EvidenceReview.create(
+        candidate,
+        decision="approved",
+        reason="The source supports the proposed fact.",
+        reviewer="history-reviewer",
+        reviewed_at=datetime(2026, 7, 25, 12, 0, tzinfo=UTC),
+        approved_fact_ids=candidate.fact_ids,
+        approved_domains=candidate.domains,
+    )
+    index_path = registry_root.resolve(
+        "tracelane://evidence/projects/hist-001/index.json",
+        must_exist=True,
+    )
+    registry_path = registry_root.resolve(
+        "tracelane://evidence/registry.json",
+        must_exist=True,
+    )
+    stale_index = index_path.read_bytes()
+    stale_registry = registry_path.read_bytes()
+
+    append_review(registry_root, review)
+    index_ref, registry_ref = rebuild_evidence_indexes(registry_root, "hist-001")
+
+    assert index_path.read_bytes() != stale_index
+    assert registry_path.read_bytes() != stale_registry
+    assert index_ref.sha256 == hashlib.sha256(index_path.read_bytes()).hexdigest()
+    assert registry_ref.sha256 == hashlib.sha256(registry_path.read_bytes()).hexdigest()
+    report = verify_evidence_registry(registry_root, "hist-001")
+    assert report.status_counts == {
+        "pending": 1,
+        "approved": 2,
+        "rejected": 1,
+        "superseded": 1,
+    }
+    assert (
+        len(
+            find_evidence(
+                registry_root,
+                EvidenceQuery(
+                    "hist-001",
+                    statuses=("approved",),
+                    fact_id="fact.1",
+                ),
+            )
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize("missing", ["index", "registry"])
+def test_rebuild_restores_exact_asymmetric_prior_state_after_late_failure(
+    registry_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    missing: str,
+) -> None:
+    index_path = registry_root.resolve(
+        "tracelane://evidence/projects/hist-001/index.json",
+        must_exist=True,
+    )
+    registry_path = registry_root.resolve(
+        "tracelane://evidence/registry.json",
+        must_exist=True,
+    )
+    (index_path if missing == "index" else registry_path).unlink()
+    before = {
+        path: (
+            path.read_bytes(),
+            (path.lstat().st_dev, path.lstat().st_ino),
+        )
+        for path in (index_path, registry_path)
+        if path.exists()
+    }
+    original = getattr(evidence_index, "_publish_derived_json", None)
+    calls = 0
+
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ValueError("injected second publication failure")
+        assert original is not None
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        evidence_index,
+        "_publish_derived_json",
+        fail_second,
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="derived publication failed"):
+        rebuild_evidence_indexes(registry_root, "hist-001")
+
+    assert calls == 2
+    for path in (index_path, registry_path):
+        if path in before:
+            assert path.read_bytes() == before[path][0]
+            assert (path.lstat().st_dev, path.lstat().st_ino) == before[path][1]
+        else:
+            assert not path.exists()
+
+
+def test_rebuild_adds_one_project_and_preserves_existing_project_entry(
+    registry_root: EvidenceRoot,
+) -> None:
+    original_registry = build_registry(registry_root)
+    original_entry = next(
+        item for item in original_registry.projects if item.project_id == "hist-001"
+    )
+    project = EvidenceProject.create(
+        project_id="hist-002",
+        title="HIST-002",
+        research_question="What evidence supports the second project?",
+        historical_cutoff_at=datetime(1812, 6, 23, 23, 59, 59, tzinfo=UTC),
+        intervention="A second intervention.",
+        required_domains=("diplomacy",),
+        admitted_source_types=("primary",),
+        status="active",
+    )
+    write_json_create_or_match(
+        registry_root,
+        "tracelane://evidence/projects/hist-002/project.json",
+        "evidence_project",
+        "tracelane://schemas/evidence-project/v1",
+        project.to_dict(),
+    )
+
+    rebuild_evidence_indexes(registry_root, "hist-002")
+
+    rebuilt = build_registry(registry_root)
+    assert tuple(item.project_id for item in rebuilt.projects) == (
+        "hist-001",
+        "hist-002",
+    )
+    assert (
+        next(item for item in rebuilt.projects if item.project_id == "hist-001") == original_entry
+    )
+    assert verify_evidence_registry(registry_root).project_count == 2
+
+
 @pytest.mark.parametrize(
     ("query", "expected"),
     [
@@ -226,6 +376,71 @@ def test_clean_query_excludes_future_control(registry_root: EvidenceRoot) -> Non
     )
     assert len(values) == 4
     assert all(item.role != "future-control" for item in values)
+
+
+def test_approved_queries_use_only_review_authorized_scope(
+    registry_root: EvidenceRoot,
+) -> None:
+    candidate_path = _candidate_path_for_fact(registry_root, "fact.1")
+    candidate_value = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate_value["domains"] = ["diplomacy", "excluded-domain"]
+    candidate_value["fact_ids"] = ["fact.1", "fact.excluded"]
+    candidate_value["record_sha256"] = candidate_record_digest(candidate_value)
+    _rewrite_json(candidate_path, candidate_value)
+    candidate = ProjectEvidenceCandidate.from_dict(candidate_value)
+    review = EvidenceReview.create(
+        candidate,
+        decision="approved",
+        reason="Only the narrow scope is supported.",
+        reviewer="history-reviewer",
+        reviewed_at=datetime(2026, 7, 25, 12, 0, tzinfo=UTC),
+        approved_fact_ids=("fact.1",),
+        approved_domains=("diplomacy",),
+    )
+    append_review(registry_root, review)
+    index_path = registry_root.resolve(
+        "tracelane://evidence/projects/hist-001/index.json",
+        must_exist=True,
+    )
+    registry_path = registry_root.resolve(
+        "tracelane://evidence/registry.json",
+        must_exist=True,
+    )
+    index_path.unlink()
+    registry_path.unlink()
+    rebuild_project_index(registry_root, "hist-001")
+    rebuild_registry(registry_root)
+
+    approved = find_evidence(
+        registry_root,
+        EvidenceQuery("hist-001", statuses=("approved",)),
+    )
+
+    narrowed = next(item for item in approved if item.candidate_id == candidate.candidate_id)
+    assert narrowed.fact_ids == ("fact.1",)
+    assert narrowed.domains == ("diplomacy",)
+    assert (
+        find_evidence(
+            registry_root,
+            EvidenceQuery(
+                "hist-001",
+                statuses=("approved",),
+                fact_id="fact.excluded",
+            ),
+        )
+        == ()
+    )
+    assert (
+        find_evidence(
+            registry_root,
+            EvidenceQuery(
+                "hist-001",
+                statuses=("approved",),
+                domain="excluded-domain",
+            ),
+        )
+        == ()
+    )
 
 
 def test_verification_reports_persisted_file_hashes(
@@ -297,12 +512,20 @@ def _index_value(root: EvidenceRoot) -> tuple[Path, dict[str, object]]:
     return path, json.loads(path.read_text(encoding="utf-8"))
 
 
-def _tree_snapshot(root: EvidenceRoot) -> dict[str, bytes]:
-    return {
-        path.relative_to(root.path).as_posix(): path.read_bytes()
-        for path in sorted(root.path.rglob("*"))
-        if path.is_file()
-    }
+def _tree_snapshot(root: EvidenceRoot) -> dict[str, tuple[object, ...]]:
+    snapshot: dict[str, tuple[object, ...]] = {}
+    for path in (root.path, *sorted(root.path.rglob("*"))):
+        metadata = path.lstat()
+        snapshot[path.relative_to(root.path).as_posix() or "."] = (
+            metadata.st_mode,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_nlink,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            path.read_bytes() if stat.S_ISREG(metadata.st_mode) else None,
+        )
+    return snapshot
 
 
 def _redigest_candidate(path: Path, changes: dict[str, object]) -> None:
@@ -588,6 +811,88 @@ def test_registry_corruption_matrix_rejects_without_further_mutation(
         verify_evidence_registry(registry_root, "hist-001")
 
     assert _tree_snapshot(registry_root) == corrupt_state
+
+
+def test_public_read_apis_attempt_no_filesystem_mutation(
+    registry_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = _tree_snapshot(registry_root)
+    attempts: list[str] = []
+
+    def reject_mutation(*args, **kwargs):
+        attempts.append("mutation")
+        raise AssertionError("read API attempted a filesystem mutation")
+
+    monkeypatch.setattr(evidence_index, "_publish_derived_json", reject_mutation)
+    for name in ("replace", "unlink", "remove", "rmdir", "mkdir"):
+        monkeypatch.setattr(evidence_index.os, name, reject_mutation)
+
+    build_project_index(registry_root, "hist-001")
+    build_registry(registry_root)
+    verify_evidence_registry(registry_root, "hist-001")
+    find_evidence(registry_root, EvidenceQuery("hist-001"))
+
+    assert attempts == []
+    assert _tree_snapshot(registry_root) == before
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda root: verify_evidence_registry(root, "hist-001"),
+        lambda root: rebuild_evidence_indexes(root, "hist-001"),
+    ],
+    ids=["verify", "rebuild"],
+)
+def test_public_registry_failures_have_path_free_traceback_chains(
+    tmp_path: Path,
+    operation,
+) -> None:
+    secret_root = tmp_path / "private-registry-root" / "evidence"
+    secret_root.parent.mkdir()
+
+    with pytest.raises(ValueError) as captured:
+        operation(secret_root)
+
+    rendered = "".join(traceback.format_exception(captured.type, captured.value, captured.tb))
+    assert "private-registry-root" not in rendered
+    assert str(secret_root) not in rendered
+    assert str(secret_root.parent) not in rendered
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda root: build_project_index(root, "hist-001"),
+        build_registry,
+        rebuild_registry,
+        lambda root: find_evidence(root, EvidenceQuery("hist-001")),
+    ],
+    ids=["project-build", "registry-build", "registry-rebuild", "find"],
+)
+def test_exported_registry_apis_sanitize_injected_path_bearing_read_failures(
+    registry_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    operation,
+) -> None:
+    secret_path = registry_root.path / "private-source-name" / "project.json"
+
+    def fail_read(*args: object, **kwargs: object) -> bytes:
+        del args, kwargs
+        raise OSError(13, "read denied", str(secret_path))
+
+    monkeypatch.setattr(evidence_index, "_secure_read", fail_read)
+
+    with pytest.raises(ValueError) as captured:
+        operation(registry_root)
+
+    rendered = "".join(traceback.format_exception(captured.type, captured.value, captured.tb))
+    assert captured.value.__cause__ is None
+    assert "private-source-name" not in rendered
+    assert str(secret_path) not in rendered
+    assert secret_path.as_posix() not in rendered
+    assert str(secret_path).replace("\\", "\\\\") not in rendered
 
 
 def test_new_source_candidate_cannot_remain_unindexed(
@@ -978,6 +1283,86 @@ def test_ordered_transformation_lineage_is_accepted(
     assert entry.transformation_ids == tuple(sorted(transformation_ids))
 
 
+def _corrupt_installed_transformation(
+    root: EvidenceRoot,
+    damage: str,
+) -> None:
+    transformation_path = sorted(
+        (root.path / "projects" / "hist-001" / "transformations").glob("*.json")
+    )[0]
+    transformation = json.loads(transformation_path.read_text(encoding="utf-8"))
+    if damage == "type":
+        transformation["transformation_type"] = "unsupported"
+    else:
+        side, field = damage.split("-", 1)
+        reference = transformation[f"{side}_ref"]
+        assert isinstance(reference, dict)
+        if field == "digest":
+            reference["sha256"] = "0" * 64
+        elif field == "uri":
+            reference["uri"] = "tracelane://artifacts/blobs/corrupt.blob"
+        elif field == "size":
+            reference["size_bytes"] = int(reference["size_bytes"]) + 1
+        elif field == "bytes":
+            blob_path = root.resolve(str(reference["uri"]), must_exist=True)
+            original = blob_path.read_bytes()
+            replacement = (b"X" if original[:1] != b"X" else b"Y") + original[1:]
+            blob_path.write_bytes(replacement)
+            return
+        else:
+            raise AssertionError(f"unknown transformation damage: {damage}")
+
+    transformation["record_sha256"] = candidate_record_digest(transformation)
+    _rewrite_json(transformation_path, transformation)
+    transformation_bytes = transformation_path.read_bytes()
+    transformation_uri = (
+        f"tracelane://evidence/projects/hist-001/transformations/{transformation_path.name}"
+    )
+    candidate_path = _candidate_path_for_fact(root, "fact.1")
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    references = candidate["transformation_refs"]
+    assert isinstance(references, list)
+    outer_reference = next(
+        item
+        for item in references
+        if isinstance(item, dict) and item.get("uri") == transformation_uri
+    )
+    outer_reference["sha256"] = hashlib.sha256(transformation_bytes).hexdigest()
+    outer_reference["size_bytes"] = len(transformation_bytes)
+    candidate["record_sha256"] = candidate_record_digest(candidate)
+    _rewrite_json(candidate_path, candidate)
+
+
+@pytest.mark.parametrize(
+    ("damage", "category"),
+    [
+        ("type", "^evidence transformation record is invalid$"),
+        ("input-digest", "^evidence transformation record is invalid$"),
+        ("output-digest", "^evidence transformation record is invalid$"),
+        ("input-uri", "^evidence transformation record is invalid$"),
+        ("output-uri", "^evidence transformation record is invalid$"),
+        ("input-size", "^evidence blob size mismatch$"),
+        ("output-size", "^evidence blob size mismatch$"),
+        ("input-bytes", "^evidence blob hash mismatch$"),
+        ("output-bytes", "^evidence blob hash mismatch$"),
+    ],
+)
+def test_public_verify_rejects_on_disk_transformation_corruption_without_writes(
+    registry_root: EvidenceRoot,
+    damage: str,
+    category: str,
+) -> None:
+    _install_lineage(registry_root, None)
+    rebuild_evidence_indexes(registry_root, "hist-001")
+    _corrupt_installed_transformation(registry_root, damage)
+    corrupt_state = _tree_snapshot(registry_root)
+
+    with pytest.raises(ValueError, match=category):
+        verify_evidence_registry(registry_root, "hist-001")
+
+    assert _tree_snapshot(registry_root) == corrupt_state
+
+
 @pytest.mark.parametrize("disconnected_at", ["first", "intermediate", "final"])
 def test_disconnected_transformation_lineage_is_rejected(
     registry_root: EvidenceRoot,
@@ -1099,20 +1484,36 @@ def test_rebuild_reauthenticates_after_publication_before_returning(
             rebuild_registry(registry_root)
 
     target.unlink()
-    original_write = evidence_index.write_json_create_or_match
+    original_publish = evidence_index._publish_derived_json
+    mutated = False
 
-    def changing_write(*args, **kwargs):
-        reference = original_write(*args, **kwargs)
-        _mutate_candidate_record(registry_root)
-        return reference
+    def changing_publication(*args, **kwargs):
+        nonlocal mutated
+        receipt = original_publish(*args, **kwargs)
+        if (
+            args[1]
+            == (
+                "tracelane://evidence/projects/hist-001/index.json"
+                if publication == "project-index"
+                else "tracelane://evidence/registry.json"
+            )
+            and not mutated
+        ):
+            mutated = True
+            _mutate_candidate_record(registry_root)
+        return receipt
 
     monkeypatch.setattr(
         evidence_index,
-        "write_json_create_or_match",
-        changing_write,
+        "_publish_derived_json",
+        changing_publication,
     )
 
-    with pytest.raises(ValueError, match="source snapshot changed"):
+    with pytest.raises(
+        ValueError,
+        match="evidence (?:derived|registry) publication failed",
+    ):
         operation()
 
-    assert target.exists()
+    assert mutated
+    assert not target.exists()

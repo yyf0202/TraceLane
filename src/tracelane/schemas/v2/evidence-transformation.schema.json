@@ -67,6 +67,9 @@
           "properties": {
             "kind": {
               "const": "evidence_blob"
+            },
+            "uri": {
+              "pattern": "^tracelane://evidence/blobs/sha256/[0-9a-f]{64}$"
             }
           }
         },

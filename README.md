@@ -40,8 +40,10 @@ project and global indexes from authenticated source inventory, candidate,
 review, transformation, and blob records before accepting persisted indexes.
 
 The public `fixtures/v0.2` package remains intentionally absent and unapproved.
-Its test is a release gate: a missing-fixture failure is expected until a
-separate review explicitly approves and publishes that fixture.
+Its tracked-package test is a release gate: today it proves only that the
+package is absent. A separate passing test exercises the same schema, loader,
+and provenance closure against a generated temporary v0.2-shaped package.
+Publication still requires a separate review and approval.
 
 ## Quick start
 
@@ -233,8 +235,18 @@ Run the local checks:
 ```bash
 python -m ruff check .
 python -m ruff format --check .
-python -m pytest -q
+python -m pytest -q --ignore=tests/v2/test_hist001_fixture.py
 ```
+
+Run the intentionally separate v0.2 release gate:
+
+```bash
+python -m pytest tests/v2/test_hist001_fixture.py -q
+```
+
+Until `fixtures/v0.2` is separately approved and published, that focused run
+has one expected failure for the absent tracked package; its generated-package
+schema, loader, and provenance test passes.
 
 ## Roadmap
 

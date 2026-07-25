@@ -1339,17 +1339,22 @@ def test_recovery_retirement_rejects_concurrent_journal_replacement(
         evidence_id="hist-001-ev-0001",
     )
     expected_journal = transaction_path.read_bytes()
-    original_replace = storage_module.os.replace
+    original_move = storage_module.atomic_move_no_replace
     injected = False
 
-    def replace_then_race(source: Path, target: Path) -> None:
+    def move_then_race(
+        source: Path,
+        target: Path,
+        *,
+        label: str,
+    ) -> None:
         nonlocal injected
-        original_replace(source, target)
+        original_move(source, target, label=label)
         if source == transaction_path and not injected:
             injected = True
             transaction_path.write_bytes(b"racing replacement")
 
-    monkeypatch.setattr(storage_module.os, "replace", replace_then_race)
+    monkeypatch.setattr(storage_module, "atomic_move_no_replace", move_then_race)
 
     with pytest.raises(ValueError, match="changed during retirement"):
         make_service(tmp_path)

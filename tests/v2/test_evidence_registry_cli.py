@@ -417,15 +417,18 @@ def test_evidence_rebuild_creates_only_missing_derived_files(
     assert _tree_state(target) == before
 
 
-def test_evidence_rebuild_rejects_index_without_registry(
+def test_evidence_rebuild_repairs_index_without_registry(
     registry_root: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     target = tmp_path / "reverse-asymmetry"
     shutil.copytree(registry_root, target)
-    (target / "registry.json").unlink()
-    before = _tree_state(target)
+    index_path = target / "projects" / "hist-001" / "index.json"
+    registry_path = target / "registry.json"
+    expected_index = index_path.read_bytes()
+    expected_registry = registry_path.read_bytes()
+    registry_path.unlink()
 
     assert (
         main(
@@ -438,11 +441,13 @@ def test_evidence_rebuild_rejects_index_without_registry(
                 "hist-001",
             ]
         )
-        == 1
+        == 0
     )
     captured = capsys.readouterr()
-    assert captured.err == "tracelane: error: evidence rebuild-index failed\n"
-    assert _tree_state(target) == before
+    assert captured.err == ""
+    assert index_path.read_bytes() == expected_index
+    assert registry_path.read_bytes() == expected_registry
+    assert verify_evidence_registry(target, "hist-001").candidate_count == 9
 
 
 def test_evidence_rebuild_rolls_back_index_after_late_registry_failure(
@@ -456,16 +461,16 @@ def test_evidence_rebuild_rolls_back_index_after_late_registry_failure(
     (target / "projects" / "hist-001" / "index.json").unlink()
     (target / "registry.json").unlink()
     before = _tree_state(target)
-    original_write = evidence_index.write_json_create_or_match_receipt
+    original_publish = evidence_index._publish_derived_json
 
     def fail_registry(*args, **kwargs):
         if args[1] == "tracelane://evidence/registry.json":
             raise ValueError("injected registry publication failure")
-        return original_write(*args, **kwargs)
+        return original_publish(*args, **kwargs)
 
     monkeypatch.setattr(
         evidence_index,
-        "write_json_create_or_match_receipt",
+        "_publish_derived_json",
         fail_registry,
     )
 
@@ -529,17 +534,19 @@ def test_evidence_rebuild_does_not_delete_replaced_file_during_rollback(
     index_path.unlink()
     registry_path.unlink()
     replacement = b"external replacement\n"
-    original_write = evidence_index.write_json_create_or_match_receipt
+    original_publish = evidence_index._publish_derived_json
 
     def replace_before_failure(*args, **kwargs):
         if args[1] == "tracelane://evidence/registry.json":
-            index_path.write_bytes(replacement)
+            competing = index_path.with_suffix(".competing")
+            competing.write_bytes(replacement)
+            os.replace(competing, index_path)
             raise ValueError("injected registry publication failure")
-        return original_write(*args, **kwargs)
+        return original_publish(*args, **kwargs)
 
     monkeypatch.setattr(
         evidence_index,
-        "write_json_create_or_match_receipt",
+        "_publish_derived_json",
         replace_before_failure,
     )
 
@@ -573,7 +580,7 @@ def test_evidence_rebuild_does_not_delete_identical_new_identity_during_rollback
     registry_path = target / "registry.json"
     index_path.unlink()
     registry_path.unlink()
-    original_publish = evidence_index.write_json_create_or_match_receipt
+    original_publish = evidence_index._publish_derived_json
 
     def replace_before_failure(*args, **kwargs):
         if args[1] == "tracelane://evidence/registry.json":
@@ -586,7 +593,7 @@ def test_evidence_rebuild_does_not_delete_identical_new_identity_during_rollback
 
     monkeypatch.setattr(
         evidence_index,
-        "write_json_create_or_match_receipt",
+        "_publish_derived_json",
         replace_before_failure,
     )
 
@@ -620,7 +627,7 @@ def test_evidence_rebuild_does_not_rollback_identical_race_owned_by_other_writer
     registry_path = target / "registry.json"
     index_path.unlink()
     registry_path.unlink()
-    original_publish = evidence_index.write_json_create_or_match_receipt
+    original_publish = evidence_index._publish_derived_json
 
     def race_then_fail(*args, **kwargs):
         root, uri, _kind, _schema_id, value = args
@@ -628,13 +635,13 @@ def test_evidence_rebuild_does_not_rollback_identical_race_owned_by_other_writer
             root.ensure_parent(root.resolve(uri))
             root.resolve(uri).write_bytes((canonical_json(value) + "\n").encode())
             receipt = original_publish(*args, **kwargs)
-            assert receipt.created_by_this_call is False
+            assert receipt.changed_by_this_call is False
             return receipt
         raise ValueError("injected registry publication failure")
 
     monkeypatch.setattr(
         evidence_index,
-        "write_json_create_or_match_receipt",
+        "_publish_derived_json",
         race_then_fail,
     )
 
@@ -657,7 +664,7 @@ def test_evidence_rebuild_does_not_rollback_identical_race_owned_by_other_writer
 
 
 @pytest.mark.parametrize("corrupt_name", ["index", "source"])
-def test_evidence_rebuild_rejects_conflicts_without_partial_mutation(
+def test_evidence_rebuild_repairs_derived_state_but_rejects_corrupt_source(
     registry_root: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -676,23 +683,27 @@ def test_evidence_rebuild_rejects_conflicts_without_partial_mutation(
         registry_path.unlink()
     before = _tree_state(target)
 
-    assert (
-        main(
-            [
-                "evidence",
-                "rebuild-index",
-                "--root",
-                str(target),
-                "--project",
-                "hist-001",
-            ]
-        )
-        == 1
+    result = main(
+        [
+            "evidence",
+            "rebuild-index",
+            "--root",
+            str(target),
+            "--project",
+            "hist-001",
+        ]
     )
     captured = capsys.readouterr()
     assert "Traceback" not in captured.err
     assert str(target.resolve()) not in captured.err
-    assert _tree_state(target) == before
+    if corrupt_name == "index":
+        assert result == 0
+        assert captured.err == ""
+        assert _tree_state(target) != before
+        assert verify_evidence_registry(target, "hist-001").candidate_count == 9
+    else:
+        assert result == 1
+        assert _tree_state(target) == before
 
 
 @pytest.mark.parametrize(

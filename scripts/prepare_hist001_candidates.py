@@ -9,17 +9,27 @@ from pathlib import Path
 from tracelane.acquisition import EvidenceCandidate, ManualAcquisitionService
 from tracelane.contracts import canonical_json
 from tracelane.evidence_registry import EvidenceImportMetadata, EvidenceImportRow
-from tracelane.hist001 import (
-    HIST001_CURATOR,
-    HIST001_RETRIEVED_AT,
-    HIST001_SESSION_ID,
-    HIST001_SOURCE_MANIFEST,
-    CandidateSpec,
-)
 from tracelane.security import classify_and_redact
 from tracelane.v2.contracts import content_digest
 from tracelane.v2.schema import validate_document
 from tracelane.v2.storage import atomic_write_bytes, secure_read_bytes
+
+if __package__:
+    from .hist001_manifest import (
+        HIST001_CURATOR,
+        HIST001_RETRIEVED_AT,
+        HIST001_SESSION_ID,
+        HIST001_SOURCE_MANIFEST,
+        CandidateSpec,
+    )
+else:
+    from hist001_manifest import (  # type: ignore[import-not-found]
+        HIST001_CURATOR,
+        HIST001_RETRIEVED_AT,
+        HIST001_SESSION_ID,
+        HIST001_SOURCE_MANIFEST,
+        CandidateSpec,
+    )
 
 SPECS = HIST001_SOURCE_MANIFEST
 

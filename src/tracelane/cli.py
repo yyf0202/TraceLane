@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     evidence_verify.add_argument("--json", action="store_true")
     evidence_rebuild = evidence_commands.add_parser(
         "rebuild-index",
-        help="Create or identity-match deterministic derived indexes.",
+        help="Rebuild and atomically replace deterministic derived indexes.",
     )
     evidence_rebuild.add_argument("--root", type=Path, default=Path("evidence"))
     evidence_rebuild.add_argument("--project", required=True)

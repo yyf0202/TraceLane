@@ -14,7 +14,6 @@ from tracelane.v2.contracts import (
     ArtifactRef,
     content_digest,
     make_object_id,
-    validate_transformation_ref,
 )
 from tracelane.v2.schema import validate_document, validate_document_date
 from tracelane.v2.source import canonical_source_url
@@ -29,6 +28,10 @@ _SOURCE_CANDIDATE_URI = re.compile(
     r"^tracelane://artifacts/[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*$"
 )
 _BLOB_URI = re.compile(r"^tracelane://evidence/blobs/sha256/[0-9a-f]{64}$")
+_TRANSFORMATION_URI = re.compile(
+    r"^tracelane://evidence/projects/([a-z][a-z0-9-]{2,63})/"
+    r"transformations/(transformation_[0-9a-f]{24})\.json$"
+)
 _LOCAL_STATE_COMPONENT = re.compile(r"(?i)(?<!\w)\.local(?=$|[\\/])")
 _SOURCE_TYPES = frozenset({"primary", "secondary", "dataset"})
 _ROLES = frozenset({"evidence", "future-control"})
@@ -121,6 +124,22 @@ def _blob_ref(reference: ArtifactRef, label: str, *, require_blob_uri: bool = Fa
             raise ValueError(f"{label} URI is invalid")
         if reference.uri.rsplit("/", 1)[-1] != reference.sha256:
             raise ValueError(f"{label} URI does not match its digest")
+    return reference
+
+
+def _project_transformation_ref(
+    reference: ArtifactRef,
+    project_id: str,
+) -> ArtifactRef:
+    match = _TRANSFORMATION_URI.fullmatch(reference.uri)
+    if (
+        reference.kind != "evidence_transformation"
+        or reference.schema_id is not None
+        or reference.media_type != "application/json"
+        or match is None
+        or match[1] != project_id
+    ):
+        raise ValueError("candidate transformation reference is invalid")
     return reference
 
 
@@ -340,6 +359,7 @@ class ProjectEvidenceCandidate:
     def from_dict(cls, value: Mapping[str, object]) -> ProjectEvidenceCandidate:
         validate_document("project-evidence-candidate", value)
         validate_document_date(value["document_date"], value["date_precision"])
+        project_id = str(value["project_id"])
         content_value = value["content_ref"]
         if not isinstance(content_value, Mapping):
             raise ValueError("content_ref must be an object")
@@ -349,16 +369,14 @@ class ProjectEvidenceCandidate:
         ):
             raise ValueError("transformation_refs must be a sequence")
         transformations = tuple(
-            validate_transformation_ref(
-                ArtifactRef.from_dict(item), label="candidate transformation reference"
-            )
+            _project_transformation_ref(ArtifactRef.from_dict(item), project_id)
             for item in transformations_value
         )
         candidate = cls(
             schema_id=str(value["schema_id"]),
             schema_version=str(value["schema_version"]),
             record_sha256=str(value["record_sha256"]),
-            project_id=str(value["project_id"]),
+            project_id=project_id,
             candidate_id=str(value["candidate_id"]),
             source_spec_id=str(value["source_spec_id"]),
             query=str(value["query"]),
@@ -561,8 +579,8 @@ class EvidenceTransformation:
             raise ValueError("candidate_id is invalid")
         if transformation.transformation_type not in _TRANSFORMATION_TYPES:
             raise ValueError("transformation_type is invalid")
-        _blob_ref(transformation.input_ref, "input_ref")
-        _blob_ref(transformation.output_ref, "output_ref")
+        _blob_ref(transformation.input_ref, "input_ref", require_blob_uri=True)
+        _blob_ref(transformation.output_ref, "output_ref", require_blob_uri=True)
         if transformation.input_ref.sha256 == transformation.output_ref.sha256:
             raise ValueError(
                 "transformation input and output must have different content identities"

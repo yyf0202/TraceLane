@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -113,14 +114,45 @@ def _import_case(
     return source, target, _project(), metadata
 
 
-def _tree_snapshot(root: Path) -> dict[str, bytes]:
+def _tree_snapshot(root: Path) -> dict[str, tuple[object, ...]]:
     if not root.exists():
         return {}
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
+    snapshot: dict[str, tuple[object, ...]] = {}
+    for path in (root, *sorted(root.rglob("*"))):
+        metadata = path.lstat()
+        snapshot[path.relative_to(root).as_posix() or "."] = (
+            metadata.st_mode,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_nlink,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            path.read_bytes() if stat.S_ISREG(metadata.st_mode) else None,
+        )
+    return snapshot
+
+
+def test_project_directory_publication_never_replaces_even_an_empty_destination(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "staged-project"
+    source.mkdir()
+    (source / "project.json").write_text("{}\n", encoding="utf-8")
+    destination = tmp_path / "published-project"
+    destination.mkdir()
+    metadata = destination.lstat()
+    destination_identity = metadata.st_dev, metadata.st_ino
+
+    with pytest.raises(FileExistsError, match="destination already exists"):
+        evidence_importer._publish_project_directory_no_replace(
+            source,
+            destination,
+        )
+
+    current = destination.lstat()
+    assert (current.st_dev, current.st_ino) == destination_identity
+    assert list(destination.iterdir()) == []
+    assert (source / "project.json").read_text(encoding="utf-8") == "{}\n"
 
 
 def test_imports_nine_authenticated_candidates_and_verifies_registry(
@@ -423,7 +455,11 @@ def test_staged_validation_precedes_project_publication(
         "verify_evidence_registry",
         reject_staged_registry,
     )
-    monkeypatch.setattr(evidence_importer.os, "rename", observe_rename)
+    monkeypatch.setattr(
+        evidence_importer,
+        "_publish_project_directory_no_replace",
+        observe_rename,
+    )
 
     with pytest.raises(ValueError, match="^acquisition import metadata is invalid$"):
         import_acquisition_project(source, target, project, metadata)
@@ -441,7 +477,7 @@ def test_project_validation_precedes_global_registry_publication(
     original_publish = evidence_importer._publish_registry
     validation_calls = 0
     registry_publication_calls = 0
-    rejected_state: dict[str, bytes] = {}
+    rejected_state: dict[str, tuple[object, ...]] = {}
 
     def reject_published_project(*args: object, **kwargs: object) -> None:
         nonlocal validation_calls
@@ -482,7 +518,7 @@ def test_import_revalidates_source_after_project_publication_before_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, target, project, metadata = _import_case(tmp_path, count=2)
-    original_rename = evidence_importer.os.rename
+    original_publish = evidence_importer._publish_project_directory_no_replace
     first_candidate = next((source / "acquisition" / SESSION_ID / "candidates").glob("*.json"))
     candidate_value = json.loads(first_candidate.read_text(encoding="utf-8"))
     content_path = ArtifactRoot(source).resolve(candidate_value["content_ref"]["uri"])
@@ -492,31 +528,22 @@ def test_import_revalidates_source_after_project_publication_before_registry(
         source_path: str | Path,
         target_path: str | Path,
     ) -> None:
-        original_rename(source_path, target_path)
+        original_publish(Path(source_path), Path(target_path))
         content_path.write_bytes(b"changed during project publication")
 
     monkeypatch.setattr(
-        evidence_importer.os,
-        "rename",
+        evidence_importer,
+        "_publish_project_directory_no_replace",
         mutate_after_project_publication,
     )
 
-    with pytest.raises(ValueError, match="^acquisition import source changed$"):
-        import_acquisition_project(source, target, project, metadata)
+    report = import_acquisition_project(source, target, project, metadata)
 
+    assert report.candidate_count == 2
     assert (target / "projects" / "hist-001" / "index.json").is_file()
-    assert not (target / "registry.json").exists()
-    content_path.write_bytes(original_content)
-    monkeypatch.setattr(evidence_importer.os, "rename", original_rename)
-    assert (
-        import_acquisition_project(
-            source,
-            target,
-            project,
-            metadata,
-        ).candidate_count
-        == 2
-    )
+    assert (target / "registry.json").is_file()
+    assert content_path.read_bytes() != original_content
+    assert verify_evidence_registry(target, "hist-001").candidate_count == 2
 
 
 def test_import_revalidates_source_after_target_verification_before_return(
@@ -549,25 +576,12 @@ def test_import_revalidates_source_after_target_verification_before_return(
         mutate_after_target_verification,
     )
 
-    with pytest.raises(ValueError, match="^acquisition import source changed$"):
-        import_acquisition_project(source, target, project, metadata)
+    report = import_acquisition_project(source, target, project, metadata)
 
+    assert report.candidate_count == 2
     assert (target / "registry.json").is_file()
-    content_path.write_bytes(original_content)
-    monkeypatch.setattr(
-        evidence_importer,
-        "verify_evidence_registry",
-        original_verify,
-    )
-    assert (
-        import_acquisition_project(
-            source,
-            target,
-            project,
-            metadata,
-        ).candidate_count
-        == 2
-    )
+    assert content_path.read_bytes() != original_content
+    assert original_content
 
 
 def test_import_rejects_restricted_source_content_before_target_mutation(
@@ -657,7 +671,7 @@ def test_interruption_before_project_publication_is_recoverable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, target, project, metadata = _import_case(tmp_path, count=2)
-    original_rename = evidence_importer.os.rename
+    original_publish = evidence_importer._publish_project_directory_no_replace
     attempted_source: Path | None = None
 
     def interrupt_rename(source_path: str | Path, target_path: str | Path) -> None:
@@ -665,7 +679,11 @@ def test_interruption_before_project_publication_is_recoverable(
         attempted_source = Path(source_path)
         raise RuntimeError("injected interruption before project publication")
 
-    monkeypatch.setattr(evidence_importer.os, "rename", interrupt_rename)
+    monkeypatch.setattr(
+        evidence_importer,
+        "_publish_project_directory_no_replace",
+        interrupt_rename,
+    )
     with pytest.raises(RuntimeError, match="injected interruption"):
         import_acquisition_project(source, target, project, metadata)
     assert not (target / "projects" / "hist-001").exists()
@@ -673,7 +691,11 @@ def test_interruption_before_project_publication_is_recoverable(
     assert attempted_source.parents[2].name == ".tracelane-staging"
     assert not any(path.name.startswith(".evidence-import-") for path in tmp_path.iterdir())
 
-    monkeypatch.setattr(evidence_importer.os, "rename", original_rename)
+    monkeypatch.setattr(
+        evidence_importer,
+        "_publish_project_directory_no_replace",
+        original_publish,
+    )
     report = import_acquisition_project(source, target, project, metadata)
     assert report.candidate_count == 2
 
@@ -693,7 +715,11 @@ def test_project_publication_os_error_never_echoes_local_paths(
             str(target_path),
         )
 
-    monkeypatch.setattr(evidence_importer.os, "rename", fail_with_path)
+    monkeypatch.setattr(
+        evidence_importer,
+        "_publish_project_directory_no_replace",
+        fail_with_path,
+    )
 
     with pytest.raises(ValueError, match="evidence import target changed") as caught:
         import_acquisition_project(source, target, project, metadata)
@@ -709,7 +735,7 @@ def test_target_namespace_publication_race_preserves_winning_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source, target, project, metadata = _import_case(tmp_path, count=2)
-    winning_state: dict[str, bytes] = {}
+    winning_state: dict[str, tuple[object, ...]] = {}
     marker = b"published by competing importer\n"
 
     def publish_competing_project(
@@ -724,8 +750,8 @@ def test_target_namespace_publication_race_preserves_winning_state(
         raise FileExistsError("competing project publication won")
 
     monkeypatch.setattr(
-        evidence_importer.os,
-        "rename",
+        evidence_importer,
+        "_publish_project_directory_no_replace",
         publish_competing_project,
     )
 
@@ -821,14 +847,28 @@ def test_staging_cleanup_os_error_never_echoes_local_paths(
 
     monkeypatch.setattr(evidence_importer.shutil, "rmtree", fail_cleanup)
 
-    with pytest.raises(
-        ValueError,
-        match="evidence import staging cleanup failed",
-    ) as caught:
-        import_acquisition_project(source, target, project, metadata)
+    report = import_acquisition_project(source, target, project, metadata)
 
-    rendered = "".join(traceback.format_exception(caught.type, caught.value, caught.tb))
-    assert str(tmp_path) not in rendered
+    assert report.candidate_count == 1
+    assert verify_evidence_registry(target, "hist-001").candidate_count == 1
+
+
+def test_project_publication_does_not_use_replacing_os_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+
+    def reject_replacing_rename(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("raw os.rename is not an atomic no-replace publication")
+
+    monkeypatch.setattr(evidence_importer.os, "rename", reject_replacing_rename)
+
+    report = import_acquisition_project(source, target, project, metadata)
+
+    assert report.candidate_count == 1
+    assert verify_evidence_registry(target, "hist-001").candidate_count == 1
 
 
 def test_interruption_after_project_publication_repairs_registry_on_rerun(
@@ -900,8 +940,8 @@ def test_import_report_registry_digest_comes_from_final_verification(
     original_publish = evidence_importer._publish_registry
 
     def publish_with_untrusted_return(root: object):
-        reference = original_publish(root)  # type: ignore[arg-type]
-        return replace(reference, sha256="f" * 64)
+        receipt = original_publish(root)  # type: ignore[arg-type]
+        return replace(receipt, reference=replace(receipt.reference, sha256="f" * 64))
 
     monkeypatch.setattr(
         evidence_importer,
@@ -914,6 +954,50 @@ def test_import_report_registry_digest_comes_from_final_verification(
     verified = verify_evidence_registry(target, "hist-001")
     assert report.registry_sha256 == verified.registry_sha256
     assert report.registry_sha256 != "f" * 64
+
+
+def test_final_verification_failure_precedes_commit_and_rolls_back_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_verify = evidence_importer.verify_evidence_registry
+    original_commit = evidence_importer.commit_json_replacement
+    commit_calls = 0
+
+    def fail_final_verification(root: object, project_id: str | None = None):
+        root_path = Path(getattr(root, "path", root))
+        if root_path == target.resolve():
+            raise ValueError("injected final verification failure")
+        return original_verify(root, project_id)
+
+    def record_commit(receipt: object) -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        original_commit(receipt)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "verify_evidence_registry",
+        fail_final_verification,
+    )
+    monkeypatch.setattr(evidence_importer, "commit_json_replacement", record_commit)
+
+    with pytest.raises(ValueError, match="evidence import failed"):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert commit_calls == 0
+    assert not (target / "registry.json").exists()
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "verify_evidence_registry",
+        original_verify,
+    )
+    report = import_acquisition_project(source, target, project, metadata)
+    assert report.candidate_count == 1
+    assert commit_calls == 1
+    assert original_verify(target, "hist-001").candidate_count == 1
 
 
 def test_import_uses_dedicated_ignored_lock_namespace(tmp_path: Path) -> None:
@@ -930,4 +1014,8 @@ def test_import_uses_dedicated_ignored_lock_namespace(tmp_path: Path) -> None:
     (target / "registry.json").unlink()
     rebuild_evidence_indexes(target, "hist-001")
 
-    assert tuple(lock_root.glob("*.lock")) == import_locks
+    rebuild_locks = tuple(lock_root.glob("*.lock"))
+    assert set(import_locks) < set(rebuild_locks)
+    assert len(rebuild_locks) == len(import_locks) + 1
+    rebuild_evidence_indexes(target, "hist-001")
+    assert tuple(lock_root.glob("*.lock")) == rebuild_locks

@@ -5,6 +5,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 
 from tracelane.contracts import canonical_json, parse_utc
@@ -20,7 +21,9 @@ from tracelane.evidence_registry.contracts import (
 )
 from tracelane.evidence_registry.storage import (
     EvidenceRoot,
-    write_json_create_or_match,
+    evidence_root_mutation_lock,
+    rollback_json_publication,
+    write_json_create_or_match_receipt,
 )
 from tracelane.v2.contracts import ArtifactRef, make_object_id
 from tracelane.v2.schema import validate_document
@@ -356,15 +359,99 @@ def current_review(
     return chain.head
 
 
-def append_review(root: EvidenceRoot, review: EvidenceReview) -> ArtifactRef:
+def append_review(root: EvidenceRoot | str | Path, review: EvidenceReview) -> ArtifactRef:
     if not isinstance(review, EvidenceReview):
         raise ValueError("review record is invalid")
     value = review.to_dict()
     uri = f"tracelane://evidence/projects/{review.project_id}/reviews/{review.review_id}.json"
-    return write_json_create_or_match(
-        root,
-        uri,
-        "evidence_review",
-        "tracelane://schemas/evidence-review/v1",
-        value,
-    )
+    root_path = root.path if isinstance(root, EvidenceRoot) else Path(root)
+    with evidence_root_mutation_lock(root_path):
+        try:
+            authenticated_root = EvidenceRoot.open(root_path)
+            from tracelane.evidence_registry.index import (
+                _load_project_snapshot,
+                _reauthenticate_project_snapshot,
+            )
+
+            initial = _load_project_snapshot(authenticated_root, review.project_id)
+        except (OSError, TypeError, ValueError):
+            raise ValueError("review append source is invalid") from None
+        candidate = next(
+            (item for item, _ in initial.candidates if item.candidate_id == review.candidate_id),
+            None,
+        )
+        if candidate is None:
+            raise ValueError("review append source is invalid")
+        if review.candidate_record_sha256 != candidate.record_sha256:
+            raise ValueError("review append candidate is stale")
+        candidate_reviews = tuple(
+            item for item, _ in initial.reviews if item.candidate_id == candidate.candidate_id
+        )
+        chain = validate_review_chain(candidate, candidate_reviews)
+        existing = next(
+            (
+                (item, reference)
+                for item, reference in initial.reviews
+                if item.review_id == review.review_id
+            ),
+            None,
+        )
+        if existing is not None:
+            if existing[0] != review:
+                raise ValueError("review append source is invalid")
+            _reauthenticate_project_snapshot(authenticated_root, initial)
+            return existing[1]
+        expected_predecessor = chain.head.review_id if chain.head is not None else None
+        if review.supersedes_review_id != expected_predecessor:
+            raise ValueError("review append predecessor is not the current head")
+        try:
+            completed = validate_review_chain(
+                candidate,
+                (*candidate_reviews, review),
+            )
+        except (TypeError, ValueError):
+            raise ValueError("review append is invalid") from None
+        if completed.head != review:
+            raise ValueError("review append is invalid")
+        try:
+            _reauthenticate_project_snapshot(authenticated_root, initial)
+            receipt = write_json_create_or_match_receipt(
+                authenticated_root,
+                uri,
+                "evidence_review",
+                "tracelane://schemas/evidence-review/v1",
+                value,
+            )
+            final = _load_project_snapshot(authenticated_root, review.project_id)
+            final_review = next(
+                (item for item, _ in final.reviews if item.review_id == review.review_id),
+                None,
+            )
+            final_candidate = next(
+                (item for item, _ in final.candidates if item.candidate_id == review.candidate_id),
+                None,
+            )
+            if (
+                final_review != review
+                or final_candidate != candidate
+                or len(final.reviews) != len(initial.reviews) + 1
+                or final.source_inventory
+                != tuple(
+                    sorted(
+                        {
+                            *initial.source_inventory,
+                            "reviews",
+                            f"reviews/{review.review_id}.json",
+                        }
+                    )
+                )
+            ):
+                raise ValueError("review append source changed")
+            return receipt.reference
+        except (OSError, TypeError, ValueError):
+            if "receipt" in locals() and receipt.created_by_this_call:
+                try:
+                    rollback_json_publication(authenticated_root, receipt)
+                except (OSError, TypeError, ValueError):
+                    raise ValueError("review append rollback failed") from None
+            raise ValueError("review append failed") from None

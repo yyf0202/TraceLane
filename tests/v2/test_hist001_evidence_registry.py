@@ -1,18 +1,28 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import re
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 
+from scripts import hist001_manifest
+from scripts import import_hist001_evidence as hist001_import
+from scripts import prepare_hist001_candidates as hist001_preparation
+from tracelane.evidence_registry.contracts import ProjectEvidenceCandidate
 from tracelane.evidence_registry.index import (
     EvidenceQuery,
     find_evidence,
     rebuild_evidence_indexes,
     verify_evidence_registry,
 )
+from tracelane.evidence_registry.reviews import EvidenceReview, append_review
+from tracelane.security import classify_and_redact
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVIDENCE_ROOT = REPO_ROOT / "evidence"
+_SHA256_TEXT = re.compile(r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])")
 EXPECTED_CANDIDATES = {
     "candidate_11e5aa586f46c2491dab8562": (
         "86a0081c91b453d5caab63c60e6c5506db27534616b5cd12663905ddc13a3afa",
@@ -182,24 +192,85 @@ def test_hist001_project_and_candidates_match_authenticated_source_manifest() ->
     _assert_candidate_identities(candidates)
 
 
-def test_hist001_registry_has_no_reviews_or_sensitive_paths_and_rebuilds_identically(
+def test_hist001_manifest_is_single_authoritative_nonruntime_script_data() -> None:
+    assert importlib.util.find_spec("tracelane.hist001") is None
+    assert hist001_preparation.SPECS is hist001_manifest.HIST001_SOURCE_MANIFEST
+    assert hist001_import.HIST001_SOURCE_MANIFEST is hist001_manifest.HIST001_SOURCE_MANIFEST
+    assert {spec.source_spec_id for spec in hist001_manifest.HIST001_SOURCE_MANIFEST} == {
+        item[2] for item in EXPECTED_CANDIDATES.values()
+    }
+
+
+def test_tracked_evidence_text_has_no_sensitive_or_absolute_local_paths() -> None:
+    sentinels = (
+        r"E:\private\evidence.txt",
+        r"\\server\share\evidence.txt",
+        r"\\?\C:\private\evidence.txt",
+        "/Users/operator/private/evidence.txt",
+        "/opt/tracelane/private/evidence.txt",
+        "operator@example.com",
+    )
+    assert all(classify_and_redact(item).redaction_applied for item in sentinels)
+
+    violations: list[str] = []
+    for path in sorted(EVIDENCE_ROOT.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        classifier_input = _SHA256_TEXT.sub("[SHA256]", text)
+        if classify_and_redact(classifier_input).redaction_applied or ".local/runtime.json" in text:
+            violations.append(path.relative_to(REPO_ROOT).as_posix())
+
+    assert violations == []
+
+
+def test_hist001_stale_source_rebuild_updates_copy_without_changing_tracked_state(
     tmp_path: Path,
 ) -> None:
     tracked_before = _tree_state(EVIDENCE_ROOT)
-    evidence_bytes = b"\n".join(tracked_before.values())
     target = tmp_path / "evidence"
     shutil.copytree(EVIDENCE_ROOT, target)
     before = _tree_state(target)
+    candidate_path = (
+        target / "projects" / "hist-001" / "candidates" / "candidate_fce1daafae049933747fef6f.json"
+    )
+    candidate = ProjectEvidenceCandidate.from_dict(
+        json.loads(candidate_path.read_text(encoding="utf-8"))
+    )
+    review = EvidenceReview.create(
+        candidate,
+        decision="approved",
+        reason="The authenticated primary source supports the scoped facts.",
+        reviewer="history-reviewer",
+        reviewed_at=datetime(2026, 7, 25, tzinfo=UTC),
+        approved_fact_ids=candidate.fact_ids,
+        approved_domains=candidate.domains,
+    )
+    stale_index = (target / "projects" / "hist-001" / "index.json").read_bytes()
+    stale_registry = (target / "registry.json").read_bytes()
 
+    append_review(target, review)
+    assert (target / "projects" / "hist-001" / "index.json").read_bytes() == stale_index
+    assert (target / "registry.json").read_bytes() == stale_registry
     rebuild_evidence_indexes(target, "hist-001")
     after = _tree_state(target)
+    report = verify_evidence_registry(target, "hist-001")
+    rebuild_evidence_indexes(target, "hist-001")
+    after_second_rebuild = _tree_state(target)
     tracked_after = _tree_state(EVIDENCE_ROOT)
 
     assert not list((EVIDENCE_ROOT / "projects" / "hist-001" / "reviews").glob("*.json"))
     assert not (REPO_ROOT / "fixtures" / "v0.2").exists()
-    assert b"D:\\" not in evidence_bytes
-    assert b"C:\\" not in evidence_bytes
-    assert b"/home/" not in evidence_bytes
-    assert b".local/runtime.json" not in evidence_bytes
-    assert before == after
+    assert report.review_count == 1
+    assert report.status_counts == {
+        "pending": 8,
+        "approved": 1,
+        "rejected": 0,
+        "superseded": 0,
+    }
+    assert before != after
+    assert after == after_second_rebuild
     assert tracked_before == tracked_after

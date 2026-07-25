@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import stat
@@ -34,6 +35,85 @@ def _is_link_or_reparse_metadata(metadata: os.stat_result) -> bool:
 
 def _identity(metadata: os.stat_result) -> tuple[int, int]:
     return metadata.st_dev, metadata.st_ino
+
+
+def atomic_move_no_replace(
+    source: str | Path,
+    destination: str | Path,
+    *,
+    label: str = "file",
+) -> None:
+    source_path = Path(source)
+    destination_path = Path(destination)
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        move_file_ex = kernel32.MoveFileExW
+        move_file_ex.argtypes = [
+            ctypes.c_wchar_p,
+            ctypes.c_wchar_p,
+            ctypes.c_ulong,
+        ]
+        move_file_ex.restype = ctypes.c_int
+        if move_file_ex(str(source_path), str(destination_path), 0):
+            return
+        error = ctypes.get_last_error()
+        if error in (80, 183) or destination_path.exists() or destination_path.is_symlink():
+            raise FileExistsError(error, f"{label} destination already exists")
+        raise OSError(error, f"{label} could not be moved")
+
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    renameat2 = getattr(libc, "renameat2", None)
+    if renameat2 is not None:
+        renameat2.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renameat2.restype = ctypes.c_int
+        if (
+            renameat2(
+                -100,
+                os.fsencode(source_path),
+                -100,
+                os.fsencode(destination_path),
+                1,
+            )
+            == 0
+        ):
+            return
+        error = ctypes.get_errno()
+        if error == errno.EEXIST:
+            raise FileExistsError(error, f"{label} destination already exists")
+        raise OSError(error, f"{label} could not be moved")
+
+    renamex_np = getattr(libc, "renamex_np", None)
+    if renamex_np is not None:
+        renamex_np.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        renamex_np.restype = ctypes.c_int
+        if (
+            renamex_np(
+                os.fsencode(source_path),
+                os.fsencode(destination_path),
+                0x00000004,
+            )
+            == 0
+        ):
+            return
+        error = ctypes.get_errno()
+        if error == errno.EEXIST:
+            raise FileExistsError(error, f"{label} destination already exists")
+        raise OSError(error, f"{label} could not be moved")
+    raise OSError(errno.ENOTSUP, f"{label} atomic no-replace move is unavailable")
 
 
 def _validate_directory(path: Path, label: str) -> os.stat_result:
@@ -169,6 +249,7 @@ def retire_authenticated_file(
     path: str | Path,
     expected_data: bytes,
     *,
+    expected_identity: tuple[int, int] | None = None,
     root: str | Path | None = None,
     label: str = "file",
 ) -> None:
@@ -183,6 +264,8 @@ def retire_authenticated_file(
     except OSError as exc:
         raise ValueError(f"{label} is unavailable") from exc
     _validate_regular(before, label)
+    if expected_identity is not None and _identity(before) != expected_identity:
+        raise ValueError(f"{label} changed during retirement")
     if secure_read_bytes(target, root=root, label=label) != expected_data:
         raise ValueError(f"{label} changed during retirement")
     try:
@@ -197,7 +280,7 @@ def retire_authenticated_file(
 
     tombstone = target.with_name(f".{target.name}.{uuid.uuid4().hex}.retired")
     try:
-        os.replace(target, tombstone)
+        atomic_move_no_replace(target, tombstone, label=label)
     except OSError as exc:
         raise ValueError(f"{label} could not be retired") from exc
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -7,6 +8,7 @@ from datetime import UTC, datetime
 import pytest
 
 from tracelane.acquisition.contracts import compute_candidate_id
+from tracelane.contracts import canonical_json
 from tracelane.evidence_registry.contracts import (
     EvidenceImportMetadata,
     EvidenceImportRow,
@@ -30,11 +32,20 @@ def blob_ref(*, digest: str = "a" * 64) -> ArtifactRef:
     )
 
 
-def transformation_ref(*, digest: str = "b" * 64) -> ArtifactRef:
+def transformation_ref(
+    *,
+    digest: str = "b" * 64,
+    project_id: str = "hist-001",
+    transformation_id: str | None = None,
+) -> ArtifactRef:
+    transformation_id = transformation_id or f"transformation_{digest[:24]}"
     return ArtifactRef.from_dict(
         {
             "kind": "evidence_transformation",
-            "uri": f"tracelane://artifacts/transformations/{digest}.json",
+            "uri": (
+                f"tracelane://evidence/projects/{project_id}/transformations/"
+                f"{transformation_id}.json"
+            ),
             "media_type": "application/json",
             "sha256": digest,
             "size_bytes": 12,
@@ -144,6 +155,32 @@ def test_candidate_transformation_refs_preserve_lineage_order(
         )
 
 
+@pytest.mark.parametrize(
+    "reference",
+    [
+        ArtifactRef.from_dict(
+            {
+                "kind": "evidence_transformation",
+                "uri": "tracelane://artifacts/transformations/value.json",
+                "media_type": "application/json",
+                "sha256": "b" * 64,
+                "size_bytes": 12,
+            }
+        ),
+        transformation_ref(project_id="other-001"),
+    ],
+    ids=["artifact-layout", "wrong-project"],
+)
+def test_candidate_transformation_ref_requires_project_registry_uri(
+    candidate_input: dict[str, object],
+    reference: ArtifactRef,
+) -> None:
+    candidate_input["transformation_refs"] = (reference,)
+
+    with pytest.raises(ValueError, match="transformation reference|transformation_refs"):
+        ProjectEvidenceCandidate.create(**candidate_input)
+
+
 def test_candidate_rejects_mismatched_lineage(candidate_input: dict[str, object]) -> None:
     candidate_input["source_candidate_content_sha256"] = "d" * 64
 
@@ -224,6 +261,32 @@ def test_transformation_round_trip_and_typed_refs(candidate_input: dict[str, obj
     assert transformation.transformation_id.startswith("transformation_")
 
 
+def test_transformation_blob_refs_require_registry_digest_uri() -> None:
+    artifact_blob = ArtifactRef.from_dict(
+        {
+            "kind": "evidence_blob",
+            "uri": "tracelane://artifacts/blobs/source.blob",
+            "media_type": "text/plain",
+            "sha256": "a" * 64,
+            "size_bytes": 12,
+        }
+    )
+
+    with pytest.raises(ValueError, match="input_ref URI|/input_ref/uri"):
+        EvidenceTransformation.create(
+            project_id="hist-001",
+            candidate_id="candidate_" + "a" * 24,
+            transformation_type="ocr",
+            input_ref=artifact_blob,
+            output_ref=blob_ref(digest="d" * 64),
+            actor="operator",
+            method="OCR",
+            parameters={},
+            created_at=datetime(2026, 7, 24, tzinfo=UTC),
+            license_implications="None.",
+        )
+
+
 @pytest.mark.parametrize(
     ("changes", "category"),
     [
@@ -287,7 +350,22 @@ def test_candidate_record_digest_excludes_only_record_digest() -> None:
     changed = deepcopy(value)
     changed["record_sha256"] = "b" * 64
 
-    assert candidate_record_digest(value) == candidate_record_digest(changed)
+    expected_payload = {
+        "content_sha256": "a" * 64,
+        "field": "value",
+    }
+    expected = hashlib.sha256(canonical_json(expected_payload).encode("utf-8")).hexdigest()
+    assert candidate_record_digest(value) == expected
+    assert candidate_record_digest(changed) == expected
+
+    for field, replacement in (
+        ("content_sha256", "c" * 64),
+        ("field", "changed"),
+        ("new_field", True),
+    ):
+        mutated = deepcopy(value)
+        mutated[field] = replacement
+        assert candidate_record_digest(mutated) != expected
 
 
 def assert_sensitive_text_is_rejected(call: object, sensitive: str) -> None:

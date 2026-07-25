@@ -2,19 +2,26 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import subprocess
 import sys
+import traceback
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+import tracelane.evidence_registry as evidence_registry_api
 from tracelane.evidence_registry import storage as evidence_storage
 from tracelane.evidence_registry.storage import (
     EvidenceBlobStore,
     EvidenceRoot,
+    evidence_root_identity,
     read_json_object,
+    rollback_json_publication,
     write_json_create_or_match,
+    write_json_create_or_match_receipt,
 )
 from tracelane.v2 import storage as v2_storage
 from tracelane.v2.contracts import ArtifactRef
@@ -25,12 +32,33 @@ def evidence_root(tmp_path: Path) -> EvidenceRoot:
     return EvidenceRoot.create(tmp_path / "evidence")
 
 
-def _tree_snapshot(root: EvidenceRoot) -> dict[str, bytes]:
-    return {
-        path.relative_to(root.path).as_posix(): path.read_bytes()
-        for path in sorted(root.path.rglob("*"))
-        if path.is_file()
-    }
+def test_package_api_does_not_export_unlocked_storage_mutators() -> None:
+    for name in (
+        "EvidenceBlobStore",
+        "EvidenceRoot",
+        "JsonPublicationReceipt",
+        "evidence_root_mutation_lock",
+        "rollback_json_publication",
+        "write_json_create_or_match",
+        "write_json_create_or_match_receipt",
+    ):
+        assert not hasattr(evidence_registry_api, name)
+
+
+def _tree_snapshot(root: EvidenceRoot) -> dict[str, tuple[object, ...]]:
+    snapshot: dict[str, tuple[object, ...]] = {}
+    for path in (root.path, *sorted(root.path.rglob("*"))):
+        metadata = path.lstat()
+        snapshot[path.relative_to(root.path).as_posix() or "."] = (
+            metadata.st_mode,
+            metadata.st_dev,
+            metadata.st_ino,
+            metadata.st_nlink,
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            path.read_bytes() if stat.S_ISREG(metadata.st_mode) else None,
+        )
+    return snapshot
 
 
 @pytest.mark.parametrize(
@@ -170,6 +198,45 @@ def test_create_and_open_are_idempotent_for_an_existing_safe_root(tmp_path: Path
     assert opened.path == created.path
 
 
+def test_existing_root_lock_identity_follows_physical_directory_after_rename(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "first-name"
+    second = tmp_path / "second-name"
+    first.mkdir()
+    initial = evidence_root_identity(first)
+
+    first.rename(second)
+
+    assert evidence_root_identity(second) == initial
+
+
+def test_mutation_lock_keeps_a_common_lock_across_root_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root_path = tmp_path / "evidence"
+    acquired: list[tuple[str, ...]] = []
+    current: list[str] = []
+
+    @contextmanager
+    def capture_lock(path: Path, *, blocking: bool):
+        assert blocking
+        current.append(Path(path).name)
+        yield
+
+    monkeypatch.setattr(evidence_storage, "exclusive_file_lock", capture_lock)
+
+    with evidence_storage.evidence_root_mutation_lock(root_path):
+        acquired.append(tuple(current))
+    current.clear()
+    root_path.mkdir()
+    with evidence_storage.evidence_root_mutation_lock(root_path):
+        acquired.append(tuple(current))
+
+    assert set(acquired[0]) & set(acquired[1])
+
+
 @pytest.mark.parametrize(
     "target_parts",
     [
@@ -287,6 +354,10 @@ def test_errors_do_not_expose_absolute_local_paths(tmp_path: Path) -> None:
 
     assert str(secret_root) not in str(captured.value)
     assert str(secret_root.resolve(strict=False)) not in str(captured.value)
+    rendered = "".join(traceback.format_exception(captured.type, captured.value, captured.tb))
+    assert "private-root-name" not in rendered
+    assert str(secret_root) not in rendered
+    assert str(secret_root.parent) not in rendered
 
 
 def test_blob_store_uses_logical_uri_and_is_idempotent(evidence_root: EvidenceRoot) -> None:
@@ -604,6 +675,208 @@ def test_json_publication_receipt_marks_identical_race_as_not_created(
     assert target.exists()
 
 
+@pytest.mark.parametrize("replacement_kind", ["different", "identical"])
+def test_json_rollback_preserves_replacement_in_final_retirement_window(
+    evidence_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    replacement_kind: str,
+) -> None:
+    uri = "tracelane://evidence/projects/hist-001/project.json"
+    value = {"project_id": "hist-001"}
+    receipt = write_json_create_or_match_receipt(
+        evidence_root,
+        uri,
+        "evidence_project",
+        "tracelane://schemas/evidence-project/v1",
+        value,
+    )
+    target = evidence_root.resolve(uri, must_exist=True)
+    replacement_data = (
+        target.read_bytes()
+        if replacement_kind == "identical"
+        else b'{"owned_by":"competing-writer"}\n'
+    )
+    original_read = evidence_storage._read_json_publication_identity
+    injected = False
+
+    def replace_after_final_authentication(path: Path, root: EvidenceRoot):
+        nonlocal injected
+        data, identity = original_read(path, root)
+        if path == target and not injected:
+            injected = True
+            replacement = target.with_suffix(".replacement")
+            replacement.write_bytes(replacement_data)
+            os.replace(replacement, target)
+        return data, identity
+
+    monkeypatch.setattr(
+        evidence_storage,
+        "_read_json_publication_identity",
+        replace_after_final_authentication,
+    )
+
+    with pytest.raises(ValueError, match="rollback"):
+        rollback_json_publication(evidence_root, receipt)
+
+    assert injected
+    assert target.read_bytes() == replacement_data
+
+
+@pytest.mark.parametrize("replacement_kind", ["different", "identical"])
+def test_json_replacement_preserves_competing_writer_at_backup_boundary(
+    evidence_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    replacement_kind: str,
+) -> None:
+    uri = "tracelane://evidence/projects/hist-001/project.json"
+    write_json_create_or_match(
+        evidence_root,
+        uri,
+        "evidence_project",
+        "tracelane://schemas/evidence-project/v1",
+        {"version": "previous"},
+    )
+    target = evidence_root.resolve(uri, must_exist=True)
+    previous_data = target.read_bytes()
+    competitor_data = (
+        previous_data if replacement_kind == "identical" else b'{"owned_by":"competing-writer"}\n'
+    )
+    original_move = evidence_storage.atomic_move_no_replace
+    competitor_identity: tuple[int, int] | None = None
+    injected = False
+
+    def compete_before_backup(
+        source: Path,
+        destination: Path,
+        *,
+        label: str,
+    ) -> None:
+        nonlocal competitor_identity, injected
+        if Path(source) == target and not injected:
+            injected = True
+            competitor = target.with_suffix(".competitor")
+            competitor.write_bytes(competitor_data)
+            os.replace(competitor, target)
+            metadata = target.lstat()
+            competitor_identity = metadata.st_dev, metadata.st_ino
+        original_move(source, destination, label=label)
+
+    monkeypatch.setattr(
+        evidence_storage,
+        "atomic_move_no_replace",
+        compete_before_backup,
+    )
+
+    with pytest.raises(ValueError, match="target changed"):
+        evidence_storage.replace_json_publication(
+            evidence_root,
+            uri,
+            "evidence_project",
+            "tracelane://schemas/evidence-project/v1",
+            {"version": "replacement"},
+        )
+
+    metadata = target.lstat()
+    assert injected
+    assert competitor_identity == (metadata.st_dev, metadata.st_ino)
+    assert target.read_bytes() == competitor_data
+
+
+@pytest.mark.parametrize("claimant_kind", ["different", "identical"])
+def test_authenticated_retirement_never_overwrites_destination_claimant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    claimant_kind: str,
+) -> None:
+    target = tmp_path / "owned.json"
+    owned_data = b'{"owned":true}\n'
+    target.write_bytes(owned_data)
+    original_move = getattr(v2_storage, "atomic_move_no_replace", None)
+    claimant_path: Path | None = None
+    claimant_data = owned_data if claimant_kind == "identical" else b'{"claimant":true}\n'
+
+    def claim_destination_then_move(
+        source: Path,
+        destination: Path,
+        *,
+        label: str,
+    ) -> None:
+        nonlocal claimant_path
+        claimant_path = Path(destination)
+        claimant_path.write_bytes(claimant_data)
+        assert original_move is not None
+        original_move(source, destination, label=label)
+
+    monkeypatch.setattr(
+        v2_storage,
+        "atomic_move_no_replace",
+        claim_destination_then_move,
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="could not be retired"):
+        v2_storage.retire_authenticated_file(target, owned_data, root=tmp_path)
+
+    assert target.read_bytes() == owned_data
+    assert claimant_path is not None
+    assert claimant_path.read_bytes() == claimant_data
+
+
+@pytest.mark.parametrize("claimant_kind", ["different", "identical"])
+def test_json_replacement_never_overwrites_backup_destination_claimant(
+    evidence_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+    claimant_kind: str,
+) -> None:
+    uri = "tracelane://evidence/projects/hist-001/project.json"
+    write_json_create_or_match(
+        evidence_root,
+        uri,
+        "evidence_project",
+        "tracelane://schemas/evidence-project/v1",
+        {"version": "previous"},
+    )
+    target = evidence_root.resolve(uri, must_exist=True)
+    previous_data = target.read_bytes()
+    original_identity = target.lstat().st_dev, target.lstat().st_ino
+    original_move = getattr(v2_storage, "atomic_move_no_replace", None)
+    claimant_path: Path | None = None
+    claimant_data = previous_data if claimant_kind == "identical" else b'{"claimant":true}\n'
+
+    def claim_destination_then_move(
+        source: Path,
+        destination: Path,
+        *,
+        label: str,
+    ) -> None:
+        nonlocal claimant_path
+        claimant_path = Path(destination)
+        claimant_path.write_bytes(claimant_data)
+        assert original_move is not None
+        original_move(source, destination, label=label)
+
+    monkeypatch.setattr(
+        evidence_storage,
+        "atomic_move_no_replace",
+        claim_destination_then_move,
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="target changed"):
+        evidence_storage.replace_json_publication(
+            evidence_root,
+            uri,
+            "evidence_project",
+            "tracelane://schemas/evidence-project/v1",
+            {"version": "replacement"},
+        )
+
+    assert target.read_bytes() == previous_data
+    assert (target.lstat().st_dev, target.lstat().st_ino) == original_identity
+    assert claimant_path is not None
+    assert claimant_path.read_bytes() == claimant_data
+
+
 def test_project_index_json_round_trip(evidence_root: EvidenceRoot) -> None:
     uri = "tracelane://evidence/projects/hist-001/index.json"
     value = {"entries": []}
@@ -673,6 +946,41 @@ def test_json_read_authenticates_kind_schema_media_hash_and_size(
                 expected_kind="evidence_registry",
                 expected_schema_id="tracelane://schemas/evidence-registry/v1",
             )
+
+
+def test_exported_json_read_sanitizes_injected_path_bearing_failure(
+    evidence_root: EvidenceRoot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = write_json_create_or_match(
+        evidence_root,
+        "tracelane://evidence/registry.json",
+        "evidence_registry",
+        "tracelane://schemas/evidence-registry/v1",
+        {"projects": []},
+    )
+    secret_path = evidence_root.path / "private-json-source" / "registry.json"
+
+    def fail_read(*args: object, **kwargs: object) -> bytes:
+        del args, kwargs
+        raise OSError(13, "read denied", str(secret_path))
+
+    monkeypatch.setattr(evidence_storage, "_secure_read", fail_read)
+
+    with pytest.raises(ValueError) as captured:
+        read_json_object(
+            evidence_root,
+            reference,
+            expected_kind="evidence_registry",
+            expected_schema_id="tracelane://schemas/evidence-registry/v1",
+        )
+
+    rendered = "".join(traceback.format_exception(captured.type, captured.value, captured.tb))
+    assert captured.value.__cause__ is None
+    assert "private-json-source" not in rendered
+    assert str(secret_path) not in rendered
+    assert secret_path.as_posix() not in rendered
+    assert str(secret_path).replace("\\", "\\\\") not in rendered
 
 
 @pytest.mark.parametrize(

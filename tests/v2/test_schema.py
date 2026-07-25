@@ -346,6 +346,40 @@ def test_transformation_and_metadata_schemas_cover_typed_refs_and_rows() -> None
     with pytest.raises(SchemaValidationError):
         validate_document("evidence-transformation", transformation)
 
+    transformation = EvidenceTransformation.create(
+        project_id="hist-001",
+        candidate_id=str(candidate["candidate_id"]),
+        transformation_type="ocr",
+        input_ref=registry_blob_ref(),
+        output_ref=registry_blob_ref(digest="c" * 64),
+        actor="operator",
+        method="OCR",
+        parameters={},
+        created_at=datetime(2026, 7, 24, tzinfo=UTC),
+        license_implications="None.",
+    ).to_dict()
+    artifact_input = dict(transformation["input_ref"])
+    artifact_input["uri"] = "tracelane://artifacts/blobs/source.blob"
+    transformation["input_ref"] = artifact_input
+    with pytest.raises(SchemaValidationError):
+        validate_document("evidence-transformation", transformation)
+
+    candidate_with_transformation = registry_candidate_value()
+    candidate_with_transformation["transformation_refs"] = [
+        {
+            "kind": "evidence_transformation",
+            "uri": "tracelane://artifacts/transformations/value.json",
+            "media_type": "application/json",
+            "sha256": "b" * 64,
+            "size_bytes": 12,
+        }
+    ]
+    with pytest.raises(SchemaValidationError):
+        validate_document(
+            "project-evidence-candidate",
+            candidate_with_transformation,
+        )
+
     parsed_candidate = ProjectEvidenceCandidate.from_dict(candidate)
     metadata = EvidenceImportMetadata.create(
         project_id="hist-001",
