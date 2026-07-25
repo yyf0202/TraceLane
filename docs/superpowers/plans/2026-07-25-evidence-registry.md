@@ -422,6 +422,9 @@ git commit -m "feat: add evidence registry contracts"
 Cover:
 
 - valid project, candidate, review, transformation, and blob URIs;
+- logical blob URI mapping from
+  `tracelane://evidence/blobs/sha256/<sha256>` to the physical
+  `evidence/blobs/sha256/<first-two-hex>/<sha256>.blob` path;
 - wrong URI root;
 - slash, backslash, percent-encoding, dot segment, absolute path, and escape;
 - symlink, Windows junction, and reparse point;
@@ -463,12 +466,17 @@ containment, and avoid returning local paths in public errors.
 
 - [ ] **Step 4: Implement create-new blob and JSON publication**
 
-Blob URIs use:
+Blob references use the stable logical URI:
 
 ```python
 digest = hashlib.sha256(data).hexdigest()
-uri = f"tracelane://evidence/blobs/sha256/{digest[:2]}/{digest}.blob"
+uri = f"tracelane://evidence/blobs/sha256/{digest}"
 ```
+
+`EvidenceRoot.resolve()` maps that logical URI to
+`blobs/sha256/{digest[:2]}/{digest}.blob` beneath the evidence root. The
+physical sharding and `.blob` suffix are never serialized into `ArtifactRef`
+URIs.
 
 For an existing target, authenticate bytes and accept only exact identity.
 Never overwrite. JSON helpers serialize with:
