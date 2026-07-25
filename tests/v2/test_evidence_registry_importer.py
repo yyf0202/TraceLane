@@ -32,6 +32,10 @@ from tracelane.v2.storage import ArtifactRoot, BlobStore
 
 NOW = datetime(2026, 7, 25, tzinfo=UTC)
 SESSION_ID = "acq_hist001_20260725"
+pytestmark = pytest.mark.skipif(
+    os.name != "nt",
+    reason="acquisition import is a Windows-only capability",
+)
 
 
 def _project(
@@ -143,6 +147,16 @@ def _redirect_directory(link: Path, target: Path) -> None:
     except OSError:
         if os.name != "nt":
             raise
+    completed = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert completed.returncode == 0
+
+
+def _create_directory_junction(link: Path, target: Path) -> None:
     completed = subprocess.run(
         ["cmd", "/c", "mklink", "/J", str(link), str(target)],
         capture_output=True,
@@ -1334,6 +1348,248 @@ def test_publication_time_quarantine_mismatch_preserves_maintenance_result(
     assert (competing_quarantine / "winner.marker").read_bytes() == competing_marker
     assert saved_owned.is_dir()
     assert not final_project.exists()
+    assert not (target / "registry.json").exists()
+
+
+def test_retirement_handle_acquisition_rejects_post_creation_redirect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "evidence"
+    live_retired = target / "projects" / "retired"
+    live_retired.mkdir(parents=True)
+    staging_namespace = tmp_path / ".tracelane-staging"
+    staging_namespace.mkdir()
+    retirement_path = staging_namespace / "retired"
+    owned_source = tmp_path / "owned-stage"
+    owned_source.mkdir()
+    (owned_source / "owned.marker").write_bytes(b"owned stage\n")
+    owned_metadata = owned_source.lstat()
+    ownership_receipt = evidence_importer._DirectoryOwnershipReceipt(
+        path=owned_source,
+        directory_identity=(owned_metadata.st_dev, owned_metadata.st_ino),
+    )
+    original_create = evidence_importer.EvidenceRoot.create
+    saved_namespace = tmp_path / "authenticated-staging-namespace"
+    marker = b"competing handle-acquisition destination\n"
+    swapped = False
+
+    def redirect_after_authenticated_creation(path: str | Path):
+        nonlocal swapped
+        root = original_create(path)
+        candidate = Path(path)
+        if not swapped and candidate.name == "retired":
+            swapped = True
+            candidate.parent.rename(saved_namespace)
+            (target / "projects" / "competing.marker").write_bytes(marker)
+            _redirect_directory(candidate.parent, target / "projects")
+        return root
+
+    monkeypatch.setattr(
+        evidence_importer.EvidenceRoot,
+        "create",
+        redirect_after_authenticated_creation,
+    )
+
+    with pytest.raises(ValueError):
+        retirement_receipt = evidence_importer._open_retirement_directory(
+            retirement_path,
+            target,
+        )
+        evidence_importer._retire_owned_directory(
+            ownership_receipt,
+            retirement_receipt,
+            prefix="stage",
+        )
+
+    assert swapped
+    assert (target / "projects" / "competing.marker").read_bytes() == marker
+    assert list(live_retired.iterdir()) == []
+    assert saved_namespace.is_dir()
+    assert (owned_source / "owned.marker").read_bytes() == b"owned stage\n"
+
+
+def test_retirement_handle_acquisition_compares_full_authenticated_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "evidence"
+    staging_namespace = tmp_path / ".tracelane-staging"
+    staging_namespace.mkdir()
+    retirement_path = staging_namespace / "retired"
+
+    def mismatched_device_identity(handle: int) -> tuple[int, int]:
+        del handle
+        metadata = retirement_path.lstat()
+        return metadata.st_dev ^ 1, metadata.st_ino
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "_windows_directory_handle_stat_identity",
+        mismatched_device_identity,
+        raising=False,
+    )
+    retirement_receipt = None
+    try:
+        with pytest.raises(
+            ValueError,
+            match="^retirement directory changed during handle acquisition$",
+        ):
+            retirement_receipt = evidence_importer._open_retirement_directory(
+                retirement_path,
+                target,
+            )
+    finally:
+        if retirement_receipt is not None:
+            evidence_importer._close_retirement_directory(retirement_receipt)
+
+
+def test_retirement_handle_acquisition_rejects_direct_leaf_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "evidence"
+    staging_namespace = tmp_path / ".tracelane-staging"
+    staging_namespace.mkdir()
+    retirement_path = staging_namespace / "retired"
+    saved_retirement = tmp_path / "authenticated-retirement"
+    original_create = evidence_importer.EvidenceRoot.create
+    swapped = False
+
+    def replace_after_authenticated_creation(path: str | Path):
+        nonlocal swapped
+        root = original_create(path)
+        candidate = Path(path)
+        if not swapped and candidate.name == "retired":
+            swapped = True
+            candidate.rename(saved_retirement)
+            candidate.mkdir()
+        return root
+
+    monkeypatch.setattr(
+        evidence_importer.EvidenceRoot,
+        "create",
+        replace_after_authenticated_creation,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^retirement directory changed during handle acquisition$",
+    ):
+        evidence_importer._open_retirement_directory(
+            retirement_path,
+            target,
+        )
+
+    assert swapped
+    assert saved_retirement.is_dir()
+    assert retirement_path.is_dir()
+
+
+def test_stage_only_quarantine_mismatch_preserves_maintenance_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_move = evidence_importer._move_project_directory_no_replace
+    saved_owned = tmp_path / "stage-owned-quarantine"
+    marker = b"stage-only competing quarantine\n"
+    competing_quarantine: Path | None = None
+
+    def fail_before_project_publication(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise ValueError("evidence import target is invalid")
+
+    def swap_stage_after_movement(
+        source_path: str | Path,
+        target_path: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal competing_quarantine
+        original_move(source_path, target_path, *args, **kwargs)
+        destination = Path(target_path)
+        if competing_quarantine is None and destination.name.startswith("stage-"):
+            competing_quarantine = destination
+            destination.rename(saved_owned)
+            destination.mkdir()
+            (destination / "winner.marker").write_bytes(marker)
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "_preflight_existing_target",
+        fail_before_project_publication,
+    )
+    monkeypatch.setattr(
+        evidence_importer,
+        "_move_project_directory_no_replace",
+        swap_stage_after_movement,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^evidence import quarantine requires maintenance$",
+    ):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert competing_quarantine is not None
+    assert (competing_quarantine / "winner.marker").read_bytes() == marker
+    assert saved_owned.is_dir()
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows dangling junction regression")
+def test_project_retirement_treats_dangling_junction_as_live_residue(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, target, project, metadata = _import_case(tmp_path, count=1)
+    original_verify = evidence_importer.verify_evidence_registry
+    original_move = evidence_importer._move_project_directory_no_replace
+    dangling_target = tmp_path / "missing-junction-target"
+    dangling_project: Path | None = None
+
+    def fail_final_verification(root: object, project_id: str | None = None):
+        root_path = Path(getattr(root, "path", root))
+        if root_path == target.resolve():
+            raise ValueError("injected final verification failure")
+        return original_verify(root, project_id)
+
+    def install_dangling_junction_after_move(
+        source_path: str | Path,
+        target_path: str | Path,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal dangling_project
+        destination = Path(target_path)
+        original_move(source_path, target_path, *args, **kwargs)
+        if dangling_project is None and destination.name.startswith("project-"):
+            dangling_project = Path(source_path)
+            _create_directory_junction(dangling_project, dangling_target)
+            assert dangling_project.is_junction()
+            assert not dangling_project.exists()
+
+    monkeypatch.setattr(
+        evidence_importer,
+        "verify_evidence_registry",
+        fail_final_verification,
+    )
+    monkeypatch.setattr(
+        evidence_importer,
+        "_move_project_directory_no_replace",
+        install_dangling_junction_after_move,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^evidence import quarantine requires maintenance$",
+    ):
+        import_acquisition_project(source, target, project, metadata)
+
+    assert dangling_project is not None
+    assert dangling_project.is_junction()
+    assert dangling_project.lstat()
     assert not (target / "registry.json").exists()
 
 

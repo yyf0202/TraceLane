@@ -554,6 +554,13 @@ The checked-in HIST-001 registry must contain:
 The import is tested for interruption, rerun, conflict, source mutation, and
 target mutation.
 
+Acquisition import is supported on Windows only and fails before target or
+staging creation on other platforms. The dependency-free design requires an
+authenticated open source-directory handle and a handle-relative destination
+move; it has no reviewed POSIX or macOS primitive with equivalent source
+ownership that avoids pathname re-resolution. Registry read, verification,
+query, and rebuild behavior remains portable.
+
 ### 10.7 Freeze gate
 
 Before explicit human approval:

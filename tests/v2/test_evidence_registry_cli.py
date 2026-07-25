@@ -181,13 +181,18 @@ def _hist001_project() -> EvidenceProject:
 
 @pytest.fixture
 def registry_root(tmp_path: Path) -> Path:
+    target = tmp_path / "evidence"
+    if os.name != "nt":
+        checked_in = Path(__file__).resolve().parents[2] / "evidence"
+        shutil.copytree(checked_in, target)
+        return target
+
     source = tmp_path / "source"
     source.mkdir()
     prepared = preparation.prepare(source)
     metadata = EvidenceImportMetadata.from_dict(
         json.loads(prepared.metadata_path.read_text(encoding="utf-8"))
     )
-    target = tmp_path / "evidence"
     import_acquisition_project(source, target, _hist001_project(), metadata)
     return target
 
@@ -773,6 +778,10 @@ def test_evidence_missing_project_and_corrupt_registry_are_stable_errors(
     assert str(registry_root.resolve()) not in corrupt_error
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="acquisition import is a Windows-only capability",
+)
 def test_import_script_imports_and_verifies_locked_hist001_project(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -958,6 +967,10 @@ def test_import_script_rejects_coherent_future_control_substitution(
     assert not target.exists()
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="acquisition import is a Windows-only capability",
+)
 def test_import_script_has_no_post_commit_reverification_window(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -988,6 +1001,10 @@ def test_import_script_has_no_post_commit_reverification_window(
     assert verify_evidence_registry(target, "hist-001").candidate_count == 9
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="acquisition import is a Windows-only capability",
+)
 def test_import_script_stdout_value_error_cannot_reverse_committed_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

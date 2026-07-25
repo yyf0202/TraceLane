@@ -55,6 +55,7 @@ from tracelane.v2.storage import ArtifactRoot, secure_read_bytes
 _PROJECT_SCHEMA = "tracelane://schemas/evidence-project/v1"
 _CANDIDATE_SCHEMA = "tracelane://schemas/project-evidence-candidate/v1"
 _REGISTRY_SCHEMA = "tracelane://schemas/evidence-registry/v1"
+_IMPORT_PLATFORM = os.name
 _PUBLIC_IMPORT_ERRORS = frozenset(
     {
         "acquisition import metadata is invalid",
@@ -69,6 +70,7 @@ _PUBLIC_IMPORT_ERRORS = frozenset(
         "acquisition transformations are not importable",
         "evidence import staging cleanup failed",
         "evidence import staging identity is invalid",
+        "evidence import is unavailable on this platform",
         "evidence import quarantine requires maintenance",
         "evidence import target changed",
         "evidence import target conflicts",
@@ -114,6 +116,8 @@ class _DirectoryOwnershipReceipt:
 class _RetirementDirectoryReceipt:
     path: Path
     directory_identity: tuple[int, int]
+    authenticated_identity: tuple[int, int]
+    evidence_root: Path
     handle: int
 
 
@@ -416,6 +420,8 @@ def _safe_remove_stage(
             retirement_receipt,
             prefix="stage",
         )
+    except _DirectoryRetirementMaintenanceError as exc:
+        raise _ProjectQuarantineMaintenanceError from exc
     except (OSError, TypeError, ValueError):
         raise ValueError("evidence import staging cleanup failed") from None
 
@@ -593,6 +599,16 @@ def _directory_identity(path: Path) -> tuple[int, int]:
     return metadata.st_dev, metadata.st_ino
 
 
+def _entry_exists_no_follow(path: Path) -> bool:
+    try:
+        Path(path).lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ValueError("owned directory live path is unavailable") from exc
+    return True
+
+
 def _windows_directory_handle_identity(handle: int) -> tuple[int, int]:
     import ctypes
     from ctypes import wintypes
@@ -629,98 +645,144 @@ def _windows_directory_handle_identity(handle: int) -> tuple[int, int]:
     return information.volume_serial_number, file_index
 
 
-def _retirement_handle_identity(handle: int) -> tuple[int, int]:
-    if os.name == "nt":
-        return _windows_directory_handle_identity(handle)
+def _windows_directory_handle_stat_identity(handle: int) -> tuple[int, int]:
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.DuplicateHandle.argtypes = [
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.HANDLE),
+        wintypes.DWORD,
+        wintypes.BOOL,
+        wintypes.DWORD,
+    ]
+    kernel32.DuplicateHandle.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    process = kernel32.GetCurrentProcess()
+    duplicate = wintypes.HANDLE()
+    if not kernel32.DuplicateHandle(
+        process,
+        wintypes.HANDLE(handle),
+        process,
+        ctypes.byref(duplicate),
+        0,
+        False,
+        0x00000002,
+    ):
+        raise ValueError("retirement directory handle is unavailable")
+    duplicate_value = int(duplicate.value)
     try:
-        metadata = os.fstat(handle)
+        descriptor = msvcrt.open_osfhandle(duplicate_value, os.O_RDONLY)
+    except (OSError, OverflowError, ValueError) as exc:
+        kernel32.CloseHandle(wintypes.HANDLE(duplicate_value))
+        raise ValueError("retirement directory handle is unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
     except OSError as exc:
         raise ValueError("retirement directory handle is unavailable") from exc
+    finally:
+        os.close(descriptor)
     if not stat.S_ISDIR(metadata.st_mode):
         raise ValueError("retirement directory handle is invalid")
     return metadata.st_dev, metadata.st_ino
 
 
-def _open_retirement_directory(path: Path) -> _RetirementDirectoryReceipt:
-    safe_path = EvidenceRoot.create(path).path
-    if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
+def _retirement_handle_identity(handle: int) -> tuple[int, int]:
+    if _IMPORT_PLATFORM != "nt":
+        raise ValueError("evidence import is unavailable on this platform")
+    return _windows_directory_handle_identity(handle)
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CreateFileW.argtypes = [
-            wintypes.LPCWSTR,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.LPVOID,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.HANDLE,
-        ]
-        kernel32.CreateFileW.restype = wintypes.HANDLE
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        handle = kernel32.CreateFileW(
-            str(safe_path),
-            0x0001 | 0x0004 | 0x0080 | 0x00100000,
-            0x00000007,
-            None,
-            3,
-            0x02000000 | 0x00200000,
-            None,
-        )
-        invalid_handle = ctypes.c_void_p(-1).value
-        if handle is None or int(handle) == invalid_handle:
-            raise ValueError("retirement directory handle is unavailable")
-        handle_value = int(handle)
-        try:
-            identity = _windows_directory_handle_identity(handle_value)
-        except BaseException:
-            kernel32.CloseHandle(wintypes.HANDLE(handle_value))
-            raise
-    else:
-        flags = (
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-            | getattr(os, "O_CLOEXEC", 0)
-        )
-        try:
-            handle_value = os.open(safe_path, flags)
-        except OSError as exc:
-            raise ValueError("retirement directory handle is unavailable") from exc
-        try:
-            identity = _retirement_handle_identity(handle_value)
-        except BaseException:
-            os.close(handle_value)
-            raise
-    return _RetirementDirectoryReceipt(
-        path=safe_path,
-        directory_identity=identity,
-        handle=handle_value,
+
+def _open_retirement_directory(
+    path: Path,
+    evidence_root: Path,
+) -> _RetirementDirectoryReceipt:
+    if _IMPORT_PLATFORM != "nt":
+        raise ValueError("evidence import is unavailable on this platform")
+
+    import ctypes
+    from ctypes import wintypes
+
+    authenticated_root = EvidenceRoot.create(path)
+    safe_path = authenticated_root.path
+    expected_evidence_root = Path(os.path.abspath(evidence_root))
+    expected_path = expected_evidence_root.parent / ".tracelane-staging" / "retired"
+    if safe_path != expected_path:
+        raise ValueError("retirement directory containment is invalid")
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.CreateFileW(
+        str(safe_path),
+        0x0001 | 0x0004 | 0x0080 | 0x00100000,
+        0x00000007,
+        None,
+        3,
+        0x02000000 | 0x00200000,
+        None,
     )
+    invalid_handle = ctypes.c_void_p(-1).value
+    if handle is None or int(handle) == invalid_handle:
+        raise ValueError("retirement directory handle is unavailable")
+    handle_value = int(handle)
+    try:
+        identity = _windows_directory_handle_identity(handle_value)
+        stat_identity = _windows_directory_handle_stat_identity(handle_value)
+        if stat_identity != authenticated_root._opened_identity or identity[1] != stat_identity[1]:
+            raise ValueError("retirement directory changed during handle acquisition")
+        receipt = _RetirementDirectoryReceipt(
+            path=safe_path,
+            directory_identity=identity,
+            authenticated_identity=authenticated_root._opened_identity,
+            evidence_root=expected_evidence_root,
+            handle=handle_value,
+        )
+        if not _retirement_directory_path_matches(receipt):
+            raise ValueError("retirement directory changed during handle acquisition")
+    except BaseException:
+        kernel32.CloseHandle(wintypes.HANDLE(handle_value))
+        raise
+    return receipt
 
 
 def _close_retirement_directory(receipt: _RetirementDirectoryReceipt) -> None:
-    if os.name == "nt":
-        import ctypes
-        from ctypes import wintypes
+    if _IMPORT_PLATFORM != "nt":
+        raise ValueError("evidence import is unavailable on this platform")
 
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        if not kernel32.CloseHandle(wintypes.HANDLE(receipt.handle)):
-            raise ValueError("retirement directory handle could not be closed")
-        return
-    try:
-        os.close(receipt.handle)
-    except OSError as exc:
-        raise ValueError("retirement directory handle could not be closed") from exc
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    if not kernel32.CloseHandle(wintypes.HANDLE(receipt.handle)):
+        raise ValueError("retirement directory handle could not be closed")
 
 
 def _retirement_directory_path_matches(
     receipt: _RetirementDirectoryReceipt,
 ) -> bool:
+    expected_path = receipt.evidence_root.parent / ".tracelane-staging" / "retired"
+    if receipt.path != expected_path:
+        return False
     try:
         metadata = receipt.path.lstat()
         reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
@@ -732,9 +794,8 @@ def _retirement_directory_path_matches(
             return False
         current_identity = metadata.st_dev, metadata.st_ino
         if (
-            current_identity[1] != receipt.directory_identity[1]
-            if os.name == "nt"
-            else current_identity != receipt.directory_identity
+            current_identity != receipt.authenticated_identity
+            or current_identity[1] != receipt.directory_identity[1]
         ):
             return False
         resolved = receipt.path.resolve(strict=True)
@@ -848,71 +909,6 @@ def _windows_move_directory_no_replace_at(
             raise OSError(errno.EACCES, "project directory publication failed")
 
 
-def _posix_move_directory_no_replace_at(
-    source: Path,
-    destination_handle: int,
-    destination_name: str,
-) -> None:
-    import ctypes
-
-    libc = ctypes.CDLL(None, use_errno=True)
-    renameat2 = getattr(libc, "renameat2", None)
-    if renameat2 is not None:
-        renameat2.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameat2.restype = ctypes.c_int
-        if (
-            renameat2(
-                -100,
-                os.fsencode(source),
-                destination_handle,
-                os.fsencode(destination_name),
-                1,
-            )
-            == 0
-        ):
-            return
-        error = ctypes.get_errno()
-        if error == errno.EEXIST:
-            raise FileExistsError(error, "project destination already exists")
-        raise OSError(error, "project directory publication failed")
-
-    renameatx_np = getattr(libc, "renameatx_np", None)
-    if renameatx_np is not None:
-        renameatx_np.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameatx_np.restype = ctypes.c_int
-        if (
-            renameatx_np(
-                -100,
-                os.fsencode(source),
-                destination_handle,
-                os.fsencode(destination_name),
-                0x00000004,
-            )
-            == 0
-        ):
-            return
-        error = ctypes.get_errno()
-        if error == errno.EEXIST:
-            raise FileExistsError(error, "project destination already exists")
-        raise OSError(error, "project directory publication failed")
-    raise OSError(
-        errno.ENOTSUP,
-        "handle-relative no-replace directory retirement is unavailable",
-    )
-
-
 def _move_project_directory_no_replace(
     source: Path,
     target: Path,
@@ -935,19 +931,12 @@ def _move_project_directory_no_replace(
         ):
             raise ValueError("retirement directory handle changed")
         path_matched_before = _retirement_directory_path_matches(retirement_receipt)
-        if os.name == "nt":
-            _windows_move_directory_no_replace_at(
-                source,
-                retirement_receipt.handle,
-                target.name,
-                source_identity,
-            )
-        else:
-            _posix_move_directory_no_replace_at(
-                source,
-                retirement_receipt.handle,
-                target.name,
-            )
+        _windows_move_directory_no_replace_at(
+            source,
+            retirement_receipt.handle,
+            target.name,
+            source_identity,
+        )
         try:
             if (
                 _retirement_handle_identity(retirement_receipt.handle)
@@ -959,69 +948,27 @@ def _move_project_directory_no_replace(
         except (OSError, TypeError, ValueError) as exc:
             raise _DirectoryRetirementMaintenanceError from exc
         return
-    if os.name == "nt":
-        import ctypes
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        move_file_ex = kernel32.MoveFileExW
-        move_file_ex.argtypes = [
-            ctypes.c_wchar_p,
-            ctypes.c_wchar_p,
-            ctypes.c_ulong,
-        ]
-        move_file_ex.restype = ctypes.c_int
-        if not move_file_ex(str(source), str(target), 0):
-            error = ctypes.get_last_error()
-            if target.exists() or target.is_symlink():
-                raise FileExistsError(error, "project destination already exists")
-            raise OSError(error, "project directory publication failed")
-        return
+    if _IMPORT_PLATFORM != "nt":
+        raise OSError(
+            errno.ENOTSUP,
+            "evidence import is unavailable on this platform",
+        )
 
     import ctypes
 
-    libc = ctypes.CDLL(None, use_errno=True)
-    renameat2 = getattr(libc, "renameat2", None)
-    if renameat2 is not None:
-        renameat2.argtypes = [
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_int,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renameat2.restype = ctypes.c_int
-        encoded_source = os.fsencode(source)
-        encoded_target = os.fsencode(target)
-        if (
-            renameat2(
-                -100,
-                encoded_source,
-                -100,
-                encoded_target,
-                1,
-            )
-            != 0
-        ):
-            error = ctypes.get_errno()
-            if error == errno.EEXIST:
-                raise FileExistsError(error, "project destination already exists")
-            raise OSError(error, "project directory publication failed")
-        return
-    renamex_np = getattr(libc, "renamex_np", None)
-    if renamex_np is not None:
-        renamex_np.argtypes = [
-            ctypes.c_char_p,
-            ctypes.c_char_p,
-            ctypes.c_uint,
-        ]
-        renamex_np.restype = ctypes.c_int
-        if renamex_np(os.fsencode(source), os.fsencode(target), 0x00000004) != 0:
-            error = ctypes.get_errno()
-            if error == errno.EEXIST:
-                raise FileExistsError(error, "project destination already exists")
-            raise OSError(error, "project directory publication failed")
-        return
-    raise OSError(errno.ENOTSUP, "atomic no-replace directory publication is unavailable")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    move_file_ex = kernel32.MoveFileExW
+    move_file_ex.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        ctypes.c_ulong,
+    ]
+    move_file_ex.restype = ctypes.c_int
+    if not move_file_ex(str(source), str(target), 0):
+        error = ctypes.get_last_error()
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(error, "project destination already exists")
+        raise OSError(error, "project directory publication failed")
 
 
 def _retire_owned_directory(
@@ -1056,7 +1003,7 @@ def _retire_owned_directory(
             raise ValueError("retired directory tree changed")
         if _directory_identity(retired) != receipt.directory_identity:
             raise ValueError("retired directory identity changed")
-        if source.exists() or source.is_symlink():
+        if _entry_exists_no_follow(source):
             raise ValueError("owned directory retirement did not clear its live path")
         if not _retirement_directory_path_matches(retirement_receipt):
             raise ValueError("retirement directory changed")
@@ -1117,12 +1064,16 @@ def _rollback_project_directory_publication(
         raise ValueError("project publication rollback target changed")
     managed_retirement_receipt: _RetirementDirectoryReceipt | None = None
     if retirement_receipt is None:
-        namespace = (
-            target.parent.parent.parent / ".tracelane-staging" / "retired"
-            if target.parent.name == "projects"
-            else target.parent / ".tracelane-staging" / "retired"
+        if target.parent.name == "projects":
+            evidence_root = target.parent.parent
+            namespace = evidence_root.parent / ".tracelane-staging" / "retired"
+        else:
+            evidence_root = target
+            namespace = target.parent / ".tracelane-staging" / "retired"
+        managed_retirement_receipt = _open_retirement_directory(
+            namespace,
+            evidence_root,
         )
-        managed_retirement_receipt = _open_retirement_directory(namespace)
         retirement_receipt = managed_retirement_receipt
     try:
         _retire_owned_directory(
@@ -1150,6 +1101,9 @@ def _import_acquisition_project(
     project: EvidenceProject,
     metadata: EvidenceImportMetadata,
 ) -> EvidenceImportReport:
+    if _IMPORT_PLATFORM != "nt":
+        raise ValueError("evidence import is unavailable on this platform")
+
     project, metadata = _validated_inputs(project, metadata)
     source_path = _canonical_absolute_path(source_root)
     target_path = _canonical_absolute_path(target_root)
@@ -1161,7 +1115,10 @@ def _import_acquisition_project(
     try:
         with evidence_root_mutation_lock(target_path):
             staging_namespace, stage_path = _staging_location(target_path)
-            retirement_receipt = _open_retirement_directory(staging_namespace / "retired")
+            retirement_receipt = _open_retirement_directory(
+                staging_namespace / "retired",
+                target_path,
+            )
             stage_receipt: _DirectoryOwnershipReceipt | None = None
             project_receipt: _ProjectDirectoryPublicationReceipt | None = None
             registry_receipt: JsonReplacementReceipt | None = None
@@ -1285,6 +1242,8 @@ def _import_acquisition_project(
                             stage_receipt,
                             retirement_receipt,
                         )
+                    except _ProjectQuarantineMaintenanceError:
+                        raise
                     except ValueError:
                         if committed_report is None and not transaction_failed:
                             raise

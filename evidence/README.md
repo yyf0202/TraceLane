@@ -54,6 +54,15 @@ canonical records and blobs match the authenticated candidate package. Human
 approval remains a separate, deliberate gate; neither preparation nor import
 creates review JSON or publishes a fixture.
 
+Acquisition import is a Windows-only capability. On non-Windows systems it
+fails before creating the target or sibling staging namespace with `evidence
+import is unavailable on this platform`. The dependency-free importer binds
+retirement to an authenticated open source-directory handle and a
+handle-relative destination; there is no reviewed POSIX or macOS primitive in
+the current design that preserves that ownership without resolving the source
+pathname again. Registry rebuild, verification, `list`, and `find` remain
+portable.
+
 The import commit point is the successful authenticated registry verification
 and construction of its report. Once reached, staging cleanup or output errors
 cannot turn the committed import into an ordinary reported failure. Before that

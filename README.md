@@ -225,6 +225,14 @@ unchanged throughout the copy. Each migrated file is published atomically, and
 the migration is considered complete only after an authenticated completion
 marker covers the published inventory.
 
+Acquisition import is supported on Windows only. On other platforms it fails
+before creating the target or sibling staging namespace with `evidence import
+is unavailable on this platform`. The dependency-free importer requires an
+authenticated open source-directory handle and a handle-relative destination
+move; the current design has no reviewed POSIX or macOS primitive providing
+the same ownership guarantee without resolving the source pathname again.
+Registry read, verification, query, and rebuild operations remain portable.
+
 Those hashes prove internal snapshot consistency; they do not establish who
 created the v1 source or whether its claims are true. Operators must select a
 trusted local source. For published experiments, the repository commit and
