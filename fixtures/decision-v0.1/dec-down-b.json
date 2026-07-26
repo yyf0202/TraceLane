@@ -1,0 +1,32 @@
+{
+  "analysts": [
+    {"analyst_id": "fund", "role": "fundamentals-analyst", "direction_hint": "bearish", "confidence_hint": 0.8},
+    {"analyst_id": "sentiment", "role": "sentiment-analyst", "direction_hint": "bearish", "confidence_hint": 0.75},
+    {"analyst_id": "risk", "role": "risk-analyst", "direction_hint": "neutral", "confidence_hint": 0.5}
+  ],
+  "resolution": {"actual_direction": "bearish", "metric_name": "net_alpha", "metric_value": -0.021},
+  "completion_facts": ["fact-demand"],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-14T09:00:00Z",
+      "evidence_id": "dec-down-b-ev-01",
+      "fact_ids": ["fact-demand"],
+      "source": "tracelane-synthetic-channel",
+      "text": "End-demand softness and rising inventory at distributors."
+    },
+    {
+      "available_at": "2026-04-15T08:00:00Z",
+      "evidence_id": "dec-down-b-ev-02",
+      "fact_ids": ["fact-demand"],
+      "source": "tracelane-synthetic-flow",
+      "text": "Estimate revisions turning lower across the street."
+    }
+  ],
+  "expected_facts": {"fact-demand": "Demand softness with negative revisions."},
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Soft demand and falling estimates: underweight?",
+  "task_id": "dec-down-b"
+}

@@ -1,0 +1,35 @@
+{
+  "analysts": [
+    {"analyst_id": "fund", "role": "fundamentals-analyst", "direction_hint": "bullish", "confidence_hint": 0.9},
+    {"analyst_id": "risk", "role": "risk-analyst", "direction_hint": "bearish", "confidence_hint": 0.9},
+    {"analyst_id": "news", "role": "news-analyst", "direction_hint": "bullish", "confidence_hint": 0.55}
+  ],
+  "resolution": {"actual_direction": "bullish", "metric_name": "net_alpha", "metric_value": 0.018},
+  "completion_facts": ["fact-contract", "fact-leverage"],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-14T09:00:00Z",
+      "evidence_id": "dec-conflict-ev-01",
+      "fact_ids": ["fact-contract"],
+      "source": "tracelane-synthetic-announcement",
+      "text": "Won a multi-year platform contract worth a tenth of revenue."
+    },
+    {
+      "available_at": "2026-04-15T08:00:00Z",
+      "evidence_id": "dec-conflict-ev-02",
+      "fact_ids": ["fact-leverage"],
+      "source": "tracelane-synthetic-filing",
+      "text": "Leverage sits at the top of the peer range with tight covenants."
+    }
+  ],
+  "expected_facts": {
+    "fact-contract": "Large multi-year contract win.",
+    "fact-leverage": "Elevated leverage with tight covenants."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Growth beat against balance-sheet risk: what stance?",
+  "task_id": "dec-conflict"
+}

@@ -1,0 +1,26 @@
+{
+  "analysts": [
+    {"analyst_id": "fund", "role": "fundamentals-analyst", "direction_hint": "bullish", "confidence_hint": 0.8},
+    {"analyst_id": "sentiment", "role": "sentiment-analyst", "abstains": true},
+    {"analyst_id": "news", "role": "news-analyst", "abstains": true},
+    {"analyst_id": "risk", "role": "risk-analyst", "abstains": true}
+  ],
+  "resolution": {"actual_direction": "bullish", "metric_name": "net_alpha", "metric_value": 0.022},
+  "completion_facts": ["fact-sparse"],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-14T09:00:00Z",
+      "evidence_id": "dec-lowcov-ev-01",
+      "fact_ids": ["fact-sparse"],
+      "source": "tracelane-synthetic-filing",
+      "text": "A single fundamentals read; sentiment, news and risk feeds are dark."
+    }
+  ],
+  "expected_facts": {"fact-sparse": "Only fundamentals data is available."},
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "With three of four desks dark, can the lone read support a stance?",
+  "task_id": "dec-low-coverage"
+}

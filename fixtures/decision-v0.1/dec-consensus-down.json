@@ -1,0 +1,32 @@
+{
+  "analysts": [
+    {"analyst_id": "fund", "role": "fundamentals-analyst", "direction_hint": "bearish", "confidence_hint": 0.85},
+    {"analyst_id": "sentiment", "role": "sentiment-analyst", "direction_hint": "bearish", "confidence_hint": 0.7},
+    {"analyst_id": "risk", "role": "risk-analyst", "direction_hint": "bearish", "confidence_hint": 0.65}
+  ],
+  "resolution": {"actual_direction": "bearish", "metric_name": "net_alpha", "metric_value": -0.027},
+  "completion_facts": ["fact-miss"],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-14T09:00:00Z",
+      "evidence_id": "dec-cons-down-ev-01",
+      "fact_ids": ["fact-miss"],
+      "source": "tracelane-synthetic-earnings",
+      "text": "Guidance cut and a goodwill impairment charge."
+    },
+    {
+      "available_at": "2026-04-15T08:00:00Z",
+      "evidence_id": "dec-cons-down-ev-02",
+      "fact_ids": ["fact-miss"],
+      "source": "tracelane-synthetic-flow",
+      "text": "Persistent distribution and rising short interest."
+    }
+  ],
+  "expected_facts": {"fact-miss": "Guidance cut with distribution."},
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Should the desk underweight SUBJ after the guide-down?",
+  "task_id": "dec-consensus-down"
+}

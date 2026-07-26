@@ -1,0 +1,32 @@
+{
+  "analysts": [
+    {"analyst_id": "fund", "role": "fundamentals-analyst", "direction_hint": "bullish", "confidence_hint": 0.85},
+    {"analyst_id": "sentiment", "role": "sentiment-analyst", "direction_hint": "bullish", "confidence_hint": 0.75},
+    {"analyst_id": "risk", "role": "risk-analyst", "direction_hint": "bullish", "confidence_hint": 0.6}
+  ],
+  "resolution": {"actual_direction": "bullish", "metric_name": "net_alpha", "metric_value": 0.031},
+  "completion_facts": ["fact-beat"],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-14T09:00:00Z",
+      "evidence_id": "dec-cons-up-ev-01",
+      "fact_ids": ["fact-beat"],
+      "source": "tracelane-synthetic-earnings",
+      "text": "Consensus-beat earnings with expanding margin."
+    },
+    {
+      "available_at": "2026-04-15T08:00:00Z",
+      "evidence_id": "dec-cons-up-ev-02",
+      "fact_ids": ["fact-beat"],
+      "source": "tracelane-synthetic-flow",
+      "text": "Sustained institutional inflows over the week."
+    }
+  ],
+  "expected_facts": {"fact-beat": "Earnings beat with inflows."},
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Should the desk overweight SUBJ after the print?",
+  "task_id": "dec-consensus-up"
+}

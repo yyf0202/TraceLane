@@ -24,6 +24,8 @@ from tracelane.experiments.runner import (
 )
 from tracelane.runner import run_task
 from tracelane.runtime.stub import DeterministicStubRuntime
+from tracelane.spine.experiments import ablate_debate, ablate_feedback_loop
+from tracelane.spine.suite import load_decision_suite
 
 
 def _add_evidence_query_arguments(parser: argparse.ArgumentParser) -> None:
@@ -72,6 +74,28 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--run", type=Path, required=True)
     inspect.add_argument("--json", action="store_true")
     inspect.add_argument("--seed", type=int, default=7, help=argparse.SUPPRESS)
+
+    decide = subparsers.add_parser(
+        "decide",
+        help="Run decision-chain ablations (debate, feedback loop).",
+    )
+    decide_commands = decide.add_subparsers(dest="decide_command", required=True)
+    decide_debate = decide_commands.add_parser(
+        "ablate-debate",
+        help="Compare debate on vs off across a decision suite.",
+    )
+    decide_debate.add_argument("--suite", type=Path, required=True)
+    decide_debate.add_argument("--artifacts", type=Path, required=True)
+    decide_debate.add_argument("--seed", type=int, default=7)
+    decide_debate.add_argument("--json", action="store_true")
+    decide_feedback = decide_commands.add_parser(
+        "ablate-feedback",
+        help="Compare static vs self-improving fusion across rounds.",
+    )
+    decide_feedback.add_argument("--suite", type=Path, required=True)
+    decide_feedback.add_argument("--rounds", type=int, default=3)
+    decide_feedback.add_argument("--min-samples", type=int, default=2)
+    decide_feedback.add_argument("--json", action="store_true")
 
     evidence = subparsers.add_parser(
         "evidence",
@@ -217,6 +241,55 @@ def _run_evidence(args: argparse.Namespace) -> int:
     return 2
 
 
+def _run_decide(args: argparse.Namespace) -> int:
+    try:
+        if args.decide_command == "ablate-debate":
+            specs = load_decision_suite(args.suite)
+            experiment_root, summary = ablate_debate(specs, args.artifacts, seed=args.seed)
+            if args.json:
+                print(canonical_json(summary))
+            else:
+                on = summary["arms"]["debate_on"]
+                off = summary["arms"]["debate_off"]
+                print(f"experiment={experiment_root.name} variable=debate_policy")
+                print(
+                    f"debate_on  accuracy={on['accuracy']:.3f} "
+                    f"mean_model_calls={on['mean_model_calls']:.2f} "
+                    f"mean_tokens={on['mean_total_tokens']:.0f}"
+                )
+                print(
+                    f"debate_off accuracy={off['accuracy']:.3f} "
+                    f"mean_model_calls={off['mean_model_calls']:.2f} "
+                    f"mean_tokens={off['mean_total_tokens']:.0f}"
+                )
+                print(
+                    f"delta accuracy={summary['deltas']['accuracy']:+.3f} "
+                    f"tokens={summary['deltas']['mean_total_tokens']:+.0f}"
+                )
+            return 0
+        if args.decide_command == "ablate-feedback":
+            specs = load_decision_suite(args.suite)
+            result = ablate_feedback_loop(specs, rounds=args.rounds, min_samples=args.min_samples)
+            if args.json:
+                print(canonical_json(result))
+            else:
+                static_acc = result["arms"]["static"]["accuracy_per_round"]
+                improving_acc = result["arms"]["self_improving"]["accuracy_per_round"]
+                print(f"variable=feedback_loop rounds={result['rounds']}")
+                print(f"static         accuracy_per_round={_fmt_accs(static_acc)}")
+                print(f"self_improving accuracy_per_round={_fmt_accs(improving_acc)}")
+                print(f"delta_final_round={result['delta_final_round']:+.3f}")
+            return 0
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        print(f"tracelane: error: decide {args.decide_command} failed: {exc}", file=sys.stderr)
+        return 1
+    return 2
+
+
+def _fmt_accs(values: Sequence[float]) -> str:
+    return "[" + ", ".join(f"{value:.3f}" for value in values) + "]"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     try:
@@ -226,6 +299,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "evidence":
             return _run_evidence(args)
+        if args.command == "decide":
+            return _run_decide(args)
         if args.command == "demo":
             tasks = load_tasks(packaged_v01_suite())
             task = next(task for task in tasks if task.task_id == "summary-001")

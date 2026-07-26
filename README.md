@@ -33,6 +33,14 @@ deterministic grades.
 - A deterministic twelve-task synthetic benchmark.
 - One-variable context-policy ablations with isolated experiment arms.
 - Offline `demo`, `eval`, `ablate`, and `inspect` commands.
+- A decision → outcome → feedback **spine** (`tracelane/spine/`): typed analyst
+  signals that must cite evidence or abstain, deterministic fusion with
+  independence discounting, a switchable debate policy, an append-only
+  hash-chained decision ledger, point-in-time outcome resolution, deterministic
+  per-signal feedback, and shrinkage-bounded reliability proposals for a
+  smallest-runnable self-improvement loop.  Drive it with
+  `tracelane decide ablate-debate …` and `tracelane decide ablate-feedback …`;
+  see [docs/decision-feedback-spine.md](docs/decision-feedback-spine.md).
 
 The tracked HIST-001 registry contains nine pending candidates, no approvals or
 reviews, and one post-cutoff future-information control. Verification derives

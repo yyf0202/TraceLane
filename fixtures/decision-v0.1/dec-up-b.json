@@ -1,0 +1,32 @@
+{
+  "analysts": [
+    {"analyst_id": "fund", "role": "fundamentals-analyst", "direction_hint": "bullish", "confidence_hint": 0.8},
+    {"analyst_id": "sentiment", "role": "sentiment-analyst", "direction_hint": "bullish", "confidence_hint": 0.7},
+    {"analyst_id": "risk", "role": "risk-analyst", "direction_hint": "neutral", "confidence_hint": 0.5}
+  ],
+  "resolution": {"actual_direction": "bullish", "metric_name": "net_alpha", "metric_value": 0.025},
+  "completion_facts": ["fact-order"],
+  "cutoff_at": "2026-04-15T12:00:00Z",
+  "evidence": [
+    {
+      "available_at": "2026-04-14T09:00:00Z",
+      "evidence_id": "dec-up-b-ev-01",
+      "fact_ids": ["fact-order"],
+      "source": "tracelane-synthetic-flow",
+      "text": "Back-to-back order intake above plan with stable pricing."
+    },
+    {
+      "available_at": "2026-04-15T08:00:00Z",
+      "evidence_id": "dec-up-b-ev-02",
+      "fact_ids": ["fact-order"],
+      "source": "tracelane-synthetic-channel",
+      "text": "Channel checks confirm restocking demand."
+    }
+  ],
+  "expected_facts": {"fact-order": "Order intake above plan."},
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic",
+  "question": "Order momentum confirmed by the channel: overweight?",
+  "task_id": "dec-up-b"
+}

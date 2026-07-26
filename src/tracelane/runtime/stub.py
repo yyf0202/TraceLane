@@ -29,6 +29,41 @@ def _prior_claims(prior_output: Mapping[str, object]) -> list[dict[str, object]]
     return [dict(claim) for claim in claims if isinstance(claim, Mapping)]
 
 
+def _analyst_signal(request: ModelRequest) -> Mapping[str, object]:
+    """Derive a deterministic analyst signal from the request's prior output.
+
+    The stub cannot reason; it reflects the deterministic ``direction`` and
+    ``confidence`` the decision orchestrator placed in ``prior_output`` for
+    this analyst, and cites the admitted evidence.  This keeps the offline
+    decision chain fully reproducible while exercising the same code path a
+    real runtime would drive.
+    """
+    evidence_ids = [
+        record.evidence_id
+        for record in sorted(
+            request.evidence, key=lambda item: (item.available_at, item.evidence_id)
+        )
+    ]
+    direction = request.prior_output.get("direction", "neutral")
+    confidence = request.prior_output.get("confidence", 0.0)
+    abstained = bool(request.prior_output.get("abstained", False))
+    if abstained:
+        return {
+            "abstained": True,
+            "abstain_reason": str(request.prior_output.get("abstain_reason", "stub abstention")),
+            "direction": "abstain",
+            "confidence": 0.0,
+            "evidence_ids": [],
+        }
+    return {
+        "abstained": False,
+        "abstain_reason": None,
+        "direction": direction if direction in {"bullish", "bearish", "neutral"} else "neutral",
+        "confidence": confidence if isinstance(confidence, (int, float)) else 0.0,
+        "evidence_ids": evidence_ids,
+    }
+
+
 class DeterministicStubRuntime:
     """An offline model double that can only reason over supplied evidence."""
 
@@ -41,6 +76,8 @@ class DeterministicStubRuntime:
         self.requests.append(request)
         if request.stage == "analyze":
             content: Mapping[str, object] = {"claims": _claims_from_evidence(request)}
+        elif request.stage == "analyst":
+            content = _analyst_signal(request)
         elif request.stage == "debate":
             content = {
                 "claims": _prior_claims(request.prior_output),
