@@ -4,132 +4,63 @@
 
 [中文说明](README.zh-CN.md) · [Changelog](CHANGELOG.md)
 
-TraceLane provides a small, reproducible environment for studying how agent
-behavior changes with context policies, orchestration strategies, checkpoints,
-and graders. Each run produces a complete set of inspectable artifacts: frozen
-inputs, an append-only trace, trusted checkpoints, a structured answer, and
-deterministic grades.
+Every run freezes its inputs, appends a trace, checkpoints trusted state, and
+emits a graded answer. Same inputs, same artifacts — model swappable, nothing
+hidden.
 
-## Goals
+## Install & run
 
-- Make every agent run observable and reproducible.
-- Separate model behavior from harness behavior.
-- Turn context, debate, and recovery strategies into testable policies.
-- Support controlled ablations instead of one-off prompt comparisons.
-- Produce traces and grader signals that can feed later evaluation and training work.
-
-## Features
-
-- Deterministic `gather → analyze → debate? → finalize → validate → publish` loop.
-- Point-in-time evidence freezing with explicit cutoff timestamps.
-- A content-addressed evidence registry for project-scoped candidate evidence
-  and retained human review decisions.
-- Raw and budgeted context-selection policies.
-- Conditional and always-on debate policies.
-- Content-addressed run identities and canonical JSON artifacts.
-- Append-only JSONL traces with model, tool, token, latency, and stage events.
-- Atomic writes and hash-chained checkpoints with trusted resume.
-- Completion, grounding, point-in-time, recovery, and operational graders.
-- A deterministic twelve-task synthetic benchmark.
-- One-variable context-policy ablations with isolated experiment arms.
-- Offline `demo`, `eval`, `ablate`, and `inspect` commands.
-- A decision → outcome → feedback **spine** (`tracelane/spine/`): typed analyst
-  signals that must cite evidence or abstain, deterministic fusion with
-  independence discounting, a switchable debate policy, an append-only
-  hash-chained decision ledger, point-in-time outcome resolution, deterministic
-  per-signal feedback, and shrinkage-bounded reliability proposals for a
-  smallest-runnable self-improvement loop.  Drive it with
-  `tracelane decide ablate-debate …` and `tracelane decide ablate-feedback …`;
-  see [docs/decision-feedback-spine.md](docs/decision-feedback-spine.md).
-- A showcase distiller (`scripts/distill_research_showcase.py`) that turns the
-  trace of a real TradingAgents multi-agent research run into a sanitized,
-  reproducible decision-suite task — real investigation structure, no real
-  tickers or prose.
-
-The tracked HIST-001 registry contains nine pending candidates, no approvals or
-reviews, and one post-cutoff future-information control. Verification derives
-project and global indexes from authenticated source inventory, candidate,
-review, transformation, and blob records before accepting persisted indexes.
-
-The public `fixtures/v0.2` package remains intentionally absent and unapproved.
-Its tracked-package test is a release gate: today it proves only that the
-package is absent. A separate passing test exercises the same schema, loader,
-and provenance closure against a generated temporary v0.2-shaped package.
-Publication still requires a separate review and approval.
-
-## Quick start
-
-TraceLane requires Python 3.11 or 3.12.
+Requires Python 3.11 or 3.12.
 
 ```bash
 git clone https://github.com/yyf0202/TraceLane.git
 cd TraceLane
-python -m venv .venv
-source .venv/bin/activate  # Windows PowerShell: .\.venv\Scripts\Activate.ps1
+python -m venv .venv && source .venv/bin/activate
 python -m pip install -e ".[dev]"
 tracelane demo --artifacts artifacts/demo
-```
-
-Inspect the generated run:
-
-```bash
 tracelane inspect --run artifacts/demo/runs/<run-id>
 ```
 
-The default demo is fully offline and does not require an API key.
+Offline, deterministic, no API key. Runs against a real model too — see below.
 
-## Local model configuration
+## What you can do
 
-The default runtime is the offline, deterministic stub — no API key required.
-To run the same flows against a **live OpenAI-compatible model**, TraceLane
-reads a private configuration that stays on the local machine. Copy the public
-template first:
+- **Replay any run.** Point-in-time evidence freezing, content-addressed run
+  ids, hash-chained checkpoints with trusted resume.
+- **Grade it.** Completion, grounding, PIT, recovery, and cost graders.
+- **Ablate a policy.** One variable per experiment — context budget, debate
+  on/off — not one-off prompt comparisons.
+- **Close the loop.** The `spine/` decision chain commits evidence-bound
+  analyst signals, fuses them, resolves outcomes against the world, and feeds
+  per-analyst reliability back into the next run:
+  `tracelane decide ablate-debate …` · `tracelane decide ablate-feedback …`
+- **Distill a real run.** `scripts/distill_research_showcase.py` turns a
+  TradingAgents research trace into a sanitized, reproducible task.
 
-```powershell
-New-Item -ItemType Directory -Force .local | Out-Null
-Copy-Item configs/runtime/openai-compatible.example.json .local/runtime.json
+Everything is offline and byte-reproducible by default.
+
+## Use a live model
+
+The default runtime is a deterministic stub. To hit a real OpenAI-compatible
+endpoint, copy the template and fill in your key (`.local/` is git-ignored):
+
+```bash
+cp configs/runtime/openai-compatible.example.json .local/runtime.json
+# edit .local/runtime.json: base_url, api_key, default_model
 ```
-
-Edit `.local/runtime.json` and set your own `api_key`, model list, and default
-model. `.local/` is ignored by Git; the committed example contains placeholders
-only.
-
-```json
-{
-  "protocol": "openai-compatible",
-  "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
-  "api_key": "replace-with-your-local-api-key",
-  "models": ["glm-5.2", "deepseek-v4-pro"],
-  "default_model": "glm-5.2"
-}
-```
-
-For Ark Coding Plan, the OpenAI-compatible base URL uses `/api/coding/v3`;
-`/api/coding` without `/v3` is the Anthropic-compatible endpoint. Treat the
-provider's current documentation and console as authoritative.
-
-The private file supplies credentials only at process startup. Traces, run
-manifests, public runtime configs, and exports must never contain `api_key`.
-`.gitignore` is not a secret vault: rotate any key that has appeared in chat,
-logs, or Git history.
-
-Pass `--runtime http` (and optionally `--model <id>`) to run a live model:
 
 ```bash
 tracelane demo --artifacts artifacts/demo --runtime http
-tracelane eval --suite fixtures/v0.1 --artifacts artifacts/eval --runtime http --model glm-5.2
+tracelane eval --suite fixtures/v0.1 --artifacts artifacts/eval \
+  --runtime http --model glm-5.2
 tracelane decide ablate-debate --suite fixtures/decision-v0.1 \
   --artifacts artifacts/decide --runtime http
 ```
 
-Runs against `--runtime http` are still hash-chained and graded the same way;
-only the model changes. Live runs are non-deterministic (the provider, not the
-harness, controls generation), so run identities differ from offline stub runs.
-
-Verified against a live OpenAI-compatible endpoint (glm-5.2): the model
-abstains cleanly when evidence has no directional content, cites evidence ids
-on non-abstaining signals, and drives the full
-signal → fusion → debate → decision → outcome → feedback ledger chain.
+Same grading, same hash chain — only the model changes. Live runs are
+non-deterministic (the provider owns generation), so run ids differ from stub
+runs. Ark Coding Plan: use the `/api/coding/v3` base URL for OpenAI-compatible;
+`/api/coding` without `/v3` is the Anthropic endpoint.
 
 ## How it works
 
@@ -138,7 +69,7 @@ flowchart LR
     T["Task + cutoff"] --> E["Freeze evidence"]
     E --> C["Select context"]
     C --> A["Analyze"]
-    A --> D{"Debate policy"}
+    A --> D{"Debate?"}
     D -->|run| B["Debate"]
     D -->|skip| F["Finalize"]
     B --> F
@@ -150,162 +81,53 @@ flowchart LR
     F -. checkpoint .-> K
 ```
 
-The orchestrator owns stage transitions, paths, checkpoint trust, validation,
-and publication. Model behavior enters through a narrow runtime interface, so a
-runtime can be replaced without changing the artifact and evaluation protocols.
-
-## Run artifacts
+The orchestrator owns stages, checkpoints, validation, and publication. The
+model enters through a narrow runtime interface, so swapping runtimes never
+touches the artifact or evaluation protocol.
 
 ```text
 artifacts/runs/<run-id>/
-├── input/
-│   ├── task.json
-│   ├── evidence.json
-│   ├── config.json
-│   └── identity.json
-├── trace/events.jsonl
-├── checkpoints/
-├── output/
-│   ├── answer.json
-│   └── grades.json
+├── input/          # task, evidence, config, identity — frozen
+├── trace/          # events.jsonl: model, tool, token, latency, stage
+├── checkpoints/    # hash-chained trusted state
+├── output/         # answer.json, grades.json
 └── run.json
 ```
 
-The run identity is derived from the task, frozen evidence bundle, harness
-configuration, model ID, and repeat number. Reopening the same run verifies the
-checkpoint chain before resuming.
-
-## Artifact integrity
-
-TraceLane verifies internal consistency: hashes, references, trace order,
-approval bindings, and complete run contents. It detects corruption and
-partial or stale substitutions. It does not claim authenticity against an
-attacker who can rewrite every artifact and Git history; a published Git
-commit or release digest is the external anchor.
-
-Manual acquisition uses a per-session lock and an authenticated operation
-journal for both ingest and promotion. Recovery validates the complete base
-inventory before materializing pending documents, validates the merged
-inventory, publishes the session manifest last, and removes the journal only
-after the published manifest is reread successfully.
-
-Promoted evidence can be archived into another artifact root without rewriting
-its references. The archive authenticates the evidence record, candidate,
-approval review, curated content, and ordered transformations before copying,
-then recreates each original `tracelane://artifacts/...` path with the same
-digest, size, and bytes. An identical archive is idempotent; conflicting target
-bytes are never overwritten. This archive protocol does not itself create or
-approve a public historical fixture.
-
-Trace payloads and free-text mapping keys retain redaction, while structural
-trace identities fail closed when their final serialized values collide with a
-configured secret. Identity fields are not redacted because changing them
-would invalidate the trace hash chain.
-
 ## Evaluation
 
-Run the complete synthetic suite:
-
 ```bash
-tracelane eval \
-  --suite fixtures/v0.1 \
-  --artifacts artifacts/eval
+tracelane eval --suite fixtures/v0.1 --artifacts artifacts/eval
+tracelane ablate --suite fixtures/v0.1 \
+  --variable context_policy --artifacts artifacts/ablate
 ```
 
-Run a context-policy ablation:
+Control and treatment arms share tasks, runtime, seed, and config. Only the
+experiment variable moves.
+
+## Checks
 
 ```bash
-tracelane ablate \
-  --suite fixtures/v0.1 \
-  --variable context_policy \
-  --artifacts artifacts/ablate
-```
-
-The control and treatment arms use the same tasks, model runtime, seed, and
-harness configuration. Only the selected experiment variable changes.
-
-Current graders cover:
-
-- required-fact completion;
-- citation precision and recall;
-- unsupported claims;
-- post-cutoff evidence use;
-- checkpoint recovery and repeated stages;
-- model/tool calls, tokens, latency, and retries.
-
-## Reproducibility
-
-- Fixtures are synthetic and generated without network access or current time.
-- The suite manifest stores hashes for every task and the generator.
-- Schemas reject unknown fields and malformed structured outputs.
-- Canonical serialization rejects non-finite numbers.
-- Fixed-clock golden tests lock normalized output.
-- Core artifacts are byte-stable across different output directories.
-
-### Migration trust boundary
-
-The v1-to-v2 importer is a local, operator-controlled migration boundary. It
-copies a selected v1 run without executing its contents or using the network,
-rejects linked trees and a target/import tree placed inside the selected
-source, and binds the source and copied payload to explicit file inventories
-and root digests. A target outside the source may contain the source; this is
-not rejected as an overlap. The importer also verifies that the source remains
-unchanged throughout the copy. Each migrated file is published atomically, and
-the migration is considered complete only after an authenticated completion
-marker covers the published inventory.
-
-Acquisition import is supported on Windows only. On other platforms it fails
-before creating the target or sibling staging namespace with `evidence import
-is unavailable on this platform`. The dependency-free importer requires an
-authenticated open source-directory handle and a handle-relative destination
-move; the current design has no reviewed POSIX or macOS primitive providing
-the same ownership guarantee without resolving the source pathname again.
-Registry read, verification, query, and rebuild operations remain portable.
-
-The v1 consistency guarantee assumes TraceLane readers and writers cooperate
-through the shared physical-root lock. A same-account process that ignores the
-lock and deliberately relocates or replaces TraceLane-owned namespace objects
-during an operation is outside the v1 threat model. Existing defensive checks
-remain fail-closed where they detect interference, but v1 does not claim
-complete namespace custody against that actor. Retained quarantine requires
-explicit, ownership-confirmed offline maintenance.
-
-Those hashes prove internal snapshot consistency; they do not establish who
-created the v1 source or whether its claims are true. Operators must select a
-trusted local source. For published experiments, the repository commit and
-release digest remain the external publication anchor.
-
-Run the local checks:
-
-```bash
-python -m ruff check .
-python -m ruff format --check .
+python -m ruff check . && python -m ruff format --check .
 python -m pytest -q --ignore=tests/v2/test_hist001_fixture.py
+python -m pytest tests/v2/test_hist001_fixture.py -q   # v0.2 release gate
 ```
 
-Run the intentionally separate v0.2 release gate:
+## Docs
 
-```bash
-python -m pytest tests/v2/test_hist001_fixture.py -q
-```
-
-Until `fixtures/v0.2` is separately approved and published, that focused run
-has one expected failure for the absent tracked package; its generated-package
-schema, loader, and provenance test passes.
+- [docs/decision-feedback-spine.md](docs/decision-feedback-spine.md) — the
+  decision → outcome → feedback spine, ablation results, and design rationale.
+- [docs/integrity-and-boundaries.md](docs/integrity-and-boundaries.md) —
+  artifact integrity, threat model, migration and release-gate boundaries.
 
 ## Roadmap
 
-- Add runtime adapters for hosted and local language models.
-- Add deterministic fault injection and automatic recovery experiments.
-- Expand benchmark development and held-out splits.
-- Support repeated experiment runs and statistical summaries.
-- Add debate-policy and recovery-policy ablations.
-- Export post-training-ready trace and grader JSONL.
-- Add calibrated human and model-based graders.
-- Grow project-scoped evidence registries through explicit human review.
-- Explore model–harness co-evolution and learned workflow policies.
+- Deterministic fault injection and recovery experiments.
+- Repeated runs and statistical summaries.
+- Post-training-ready trace/grader JSONL export.
+- Calibrated human and model graders.
+- Model–harness co-evolution and learned workflow policies.
 
 ## License
 
-TraceLane is licensed under Apache-2.0. See [LICENSE](LICENSE) and
-[NOTICE](NOTICE).
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
