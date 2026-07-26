@@ -41,6 +41,10 @@ deterministic grades.
   smallest-runnable self-improvement loop.  Drive it with
   `tracelane decide ablate-debate …` and `tracelane decide ablate-feedback …`;
   see [docs/decision-feedback-spine.md](docs/decision-feedback-spine.md).
+- A showcase distiller (`scripts/distill_research_showcase.py`) that turns the
+  trace of a real TradingAgents multi-agent research run into a sanitized,
+  reproducible decision-suite task — real investigation structure, no real
+  tickers or prose.
 
 The tracked HIST-001 registry contains nine pending candidates, no approvals or
 reviews, and one post-cutoff future-information control. Verification derives

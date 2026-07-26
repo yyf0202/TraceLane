@@ -1,0 +1,102 @@
+{
+  "analysts": [
+    {
+      "analyst_id": "market",
+      "confidence_hint": 0.599,
+      "direction_hint": "bearish",
+      "role": "market-analyst"
+    },
+    {
+      "analyst_id": "social",
+      "confidence_hint": 0.566,
+      "direction_hint": "bearish",
+      "role": "sentiment-analyst"
+    },
+    {
+      "analyst_id": "news",
+      "confidence_hint": 0.597,
+      "direction_hint": "bearish",
+      "role": "news-analyst"
+    },
+    {
+      "analyst_id": "fundamentals",
+      "confidence_hint": 0.589,
+      "direction_hint": "bullish",
+      "role": "fundamentals-analyst"
+    },
+    {
+      "analyst_id": "industry",
+      "confidence_hint": 0.9,
+      "direction_hint": "bullish",
+      "role": "industry-analyst"
+    }
+  ],
+  "completion_facts": [
+    "fact-market"
+  ],
+  "cutoff_at": "2026-07-10T15:00:00+08:00",
+  "evidence": [
+    {
+      "available_at": "2026-07-10T09:00:00+08:00",
+      "evidence_id": "showcase-001-c86f2a-ev-01",
+      "fact_ids": [
+        "fact-market"
+      ],
+      "source": "tracelane-showcase-market-report",
+      "text": "Synthetic market note for showcase subject SHOWCASE-001-C86F2A: structure distilled from a real market-analyst report."
+    },
+    {
+      "available_at": "2026-07-10T10:00:00+08:00",
+      "evidence_id": "showcase-001-c86f2a-ev-02",
+      "fact_ids": [
+        "fact-social"
+      ],
+      "source": "tracelane-showcase-sentiment-report",
+      "text": "Synthetic social note for showcase subject SHOWCASE-001-C86F2A: structure distilled from a real sentiment-analyst report."
+    },
+    {
+      "available_at": "2026-07-10T11:00:00+08:00",
+      "evidence_id": "showcase-001-c86f2a-ev-03",
+      "fact_ids": [
+        "fact-news"
+      ],
+      "source": "tracelane-showcase-news-report",
+      "text": "Synthetic news note for showcase subject SHOWCASE-001-C86F2A: structure distilled from a real news-analyst report."
+    },
+    {
+      "available_at": "2026-07-10T12:00:00+08:00",
+      "evidence_id": "showcase-001-c86f2a-ev-04",
+      "fact_ids": [
+        "fact-fundamentals"
+      ],
+      "source": "tracelane-showcase-fundamentals-report",
+      "text": "Synthetic fundamentals note for showcase subject SHOWCASE-001-C86F2A: structure distilled from a real fundamentals-analyst report."
+    },
+    {
+      "available_at": "2026-07-10T13:00:00+08:00",
+      "evidence_id": "showcase-001-c86f2a-ev-05",
+      "fact_ids": [
+        "fact-industry"
+      ],
+      "source": "tracelane-showcase-industry-report",
+      "text": "Synthetic industry note for showcase subject SHOWCASE-001-C86F2A: structure distilled from a real industry-analyst report."
+    }
+  ],
+  "expected_facts": {
+    "fact-fundamentals": "Structural contribution of the fundamentals analyst.",
+    "fact-industry": "Structural contribution of the industry analyst.",
+    "fact-market": "Structural contribution of the market analyst.",
+    "fact-news": "Structural contribution of the news analyst.",
+    "fact-social": "Structural contribution of the social analyst."
+  },
+  "fault_scenario": null,
+  "future_evidence_ids": [],
+  "license": "CC0-1.0 synthetic (structure distilled from a real run)",
+  "question": "Showcase subject SHOWCASE-001-C86F2A: reconcile the analyst roster into a stance. Structure distilled from a real deep-research run.",
+  "resolution": {
+    "actual_direction": "neutral",
+    "metric_name": "net_alpha",
+    "metric_value": 0.0
+  },
+  "task_id": "SHOWCASE-001-C86F2A"
+}

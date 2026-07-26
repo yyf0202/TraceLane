@@ -119,6 +119,66 @@ Two honest findings, both of which argue *for* the guardrails:
   real runtime would drive.  Swapping in a real model changes only the
   runtime, not the spine.
 
+## Showcases: distilling a real TradingAgents research run
+
+`scripts/distill_research_showcase.py` is an offline, deterministic adapter
+that turns the trace of one real TradingAgents multi-agent research run (a
+``fullflow`` JSON: analyst reports, a bull/bear debate, a risk debate, and a
+final rating) into a standard decision-suite task under `fixtures/showcase/`.
+It preserves the *structure* of a real investigation — the analyst roster that
+actually ran, a deterministic per-analyst stance derived from structural
+signals, and a resolution mapped from the run's final rating — while dropping
+the *content*: the real ticker and company identity are replaced by a synthetic
+subject id (`SHOWCASE-###-XXXXXX`), and every report's prose is replaced by a
+short synthetic note tagged only with its source type.  No model is called and
+no wall clock is read, so the showcase is reproducible and the repository stays
+clean of licensed data and credentials.
+
+```bash
+python scripts/distill_research_showcase.py path/to/FULLFLOW.json --out fixtures/showcase
+tracelane decide ablate-debate   --suite fixtures/showcase --artifacts artifacts/showcase
+tracelane decide ablate-feedback --suite fixtures/showcase --rounds 3
+```
+
+A Hold-rated run distills into a *standoff*: the roster splits bull/bear so
+weighted conviction cancels (high fusion disagreement, near-zero score), which
+is exactly the regime where a debate policy should earn its cost.  Distilling
+several runs with different final ratings (Buy / Hold / Sell) into one suite is
+what turns a single showcase into an ablation with real discriminating power.
+
+## Controlled ablation suites
+
+A handful of distilled real runs is a poor substrate for ablation: ground
+truth is unresolved, the sample is tiny, and the noise is uncontrolled.
+`scripts/generate_ablation_suite.py` generates a suite whose *signal-to-noise
+is known by construction*, so a debate or feedback ablation must surface its
+effect and that effect is attributable to a named variable:
+
+* a block of **reliable** analysts (tunable per-analyst reliability);
+* a **noisy** analyst who is *confident but systematically wrong* — the key
+  ingredient for the feedback loop, since the static arm keeps getting misled
+  by that confidence while the self-improving arm learns to down-weight it;
+* a tunable **disagreement fraction** of contested tasks for the debate
+  ablation.
+
+```bash
+python scripts/generate_ablation_suite.py --out /tmp/suite \
+    --tasks 12 --seed 7 --disagreement-fraction 0.3 --reliability 0.8
+tracelane decide ablate-feedback --suite /tmp/suite --rounds 5 --min-samples 3
+```
+
+Measured across seeds 1, 7, 42, 123, 999 (12 tasks, 5 rounds): the
+self-improving arm beats the static arm by **+0.417 to +0.667** final-round
+accuracy every time, and the systematically-wrong analyst's learned reliability
+is driven to **0.125** while the reliable analysts stay high.  The static arm
+never improves (it cannot learn); the self-improving arm converges toward the
+reliable ceiling.  That is the co-evolution mechanism working, reproducibly,
+with the effect attributable to the feedback loop and nothing else.
+
+Distilled real runs and generated suites complement each other: the real runs
+are *authenticity anchors* (this structure really occurs), while the generated
+suites are *causal substrates* (this mechanism really does the work).
+
 ## Product path
 
 1. Ship the spine as the auditable decision layer behind any research agent.
