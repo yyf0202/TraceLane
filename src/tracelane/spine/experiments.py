@@ -105,7 +105,7 @@ def _run_decision(
         resolution=spec.resolution,
         debate_policy=debate_policy,
     )
-    decision_direction = stance_from_score(result.fusion.score, 0.0)
+    decision_direction = result.fusion.direction
     correct = (
         spec.resolution.actual_direction is not None
         and decision_direction == spec.resolution.actual_direction
@@ -275,7 +275,7 @@ def ablate_feedback_loop(
             if actual is None:
                 continue
             resolved += 1
-            stance = stance_from_score(fusion.score, 0.0)
+            stance = fusion.direction
             if stance == actual:
                 correct += 1
             for signal in signals:
