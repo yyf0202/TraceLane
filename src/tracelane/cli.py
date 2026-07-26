@@ -23,9 +23,45 @@ from tracelane.experiments.runner import (
     packaged_v01_suite,
 )
 from tracelane.runner import run_task
+from tracelane.runtime.base import ModelRuntime
+from tracelane.runtime.config import load_http_runtime_config
+from tracelane.runtime.http import OpenAICompatibleRuntime
 from tracelane.runtime.stub import DeterministicStubRuntime
 from tracelane.spine.experiments import ablate_debate, ablate_feedback_loop
 from tracelane.spine.suite import load_decision_suite
+
+
+def _add_runtime_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--runtime",
+        choices=("stub", "http"),
+        default="stub",
+        help=(
+            "Model runtime: 'stub' (offline, deterministic, default) or 'http' "
+            "(live OpenAI-compatible endpoint configured in .local/runtime.json)."
+        ),
+    )
+    parser.add_argument(
+        "--runtime-config",
+        type=Path,
+        default=None,
+        help="Path to the local runtime JSON config (default: .local/runtime.json).",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Override the default model id from the runtime config.",
+    )
+
+
+def _resolve_runtime(args: argparse.Namespace) -> ModelRuntime:
+    if getattr(args, "runtime", "stub") != "http":
+        return DeterministicStubRuntime()
+    config = load_http_runtime_config(
+        getattr(args, "runtime_config", None),
+        model_override=getattr(args, "model", None),
+    )
+    return OpenAICompatibleRuntime(config)
 
 
 def _add_evidence_query_arguments(parser: argparse.ArgumentParser) -> None:
@@ -58,17 +94,20 @@ def build_parser() -> argparse.ArgumentParser:
     demo = subparsers.add_parser("demo", help="Run one packaged offline task.")
     demo.add_argument("--artifacts", type=Path, required=True)
     demo.add_argument("--seed", type=int, default=7)
+    _add_runtime_argument(demo)
 
     evaluate = subparsers.add_parser("eval", help="Evaluate a deterministic task suite.")
     evaluate.add_argument("--suite", type=Path, required=True)
     evaluate.add_argument("--artifacts", type=Path, required=True)
     evaluate.add_argument("--seed", type=int, default=7)
+    _add_runtime_argument(evaluate)
 
     ablate = subparsers.add_parser("ablate", help="Run a one-variable ablation.")
     ablate.add_argument("--suite", type=Path, required=True)
     ablate.add_argument("--variable", choices=["context_policy"], required=True)
     ablate.add_argument("--artifacts", type=Path, required=True)
     ablate.add_argument("--seed", type=int, default=7)
+    _add_runtime_argument(ablate)
 
     inspect = subparsers.add_parser("inspect", help="Inspect one completed run.")
     inspect.add_argument("--run", type=Path, required=True)
@@ -88,6 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     decide_debate.add_argument("--artifacts", type=Path, required=True)
     decide_debate.add_argument("--seed", type=int, default=7)
     decide_debate.add_argument("--json", action="store_true")
+    _add_runtime_argument(decide_debate)
     decide_feedback = decide_commands.add_parser(
         "ablate-feedback",
         help="Compare static vs self-improving fusion across rounds.",
@@ -245,7 +285,9 @@ def _run_decide(args: argparse.Namespace) -> int:
     try:
         if args.decide_command == "ablate-debate":
             specs = load_decision_suite(args.suite)
-            experiment_root, summary = ablate_debate(specs, args.artifacts, seed=args.seed)
+            experiment_root, summary = ablate_debate(
+                specs, args.artifacts, seed=args.seed, runtime=_resolve_runtime(args)
+            )
             if args.json:
                 print(canonical_json(summary))
             else:
@@ -307,7 +349,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = run_task(
                 task,
                 HarnessConfig(seed=args.seed),
-                DeterministicStubRuntime(),
+                _resolve_runtime(args),
                 args.artifacts,
             )
             coverage = 0.0
@@ -324,6 +366,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 load_tasks(args.suite),
                 HarnessConfig(seed=args.seed),
                 args.artifacts,
+                runtime=_resolve_runtime(args),
             )
             print(
                 f"tasks={summary['task_count']} passed={summary['passed_count']} "
@@ -335,6 +378,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 load_tasks(args.suite),
                 args.artifacts,
                 seed=args.seed,
+                runtime=_resolve_runtime(args),
             )
             control = summary["arms"]["control"]["pass_rate"]
             treatment = summary["arms"]["treatment"]["pass_rate"]

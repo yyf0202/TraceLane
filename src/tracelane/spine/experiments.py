@@ -34,6 +34,7 @@ from tracelane.contracts import (
     sha256_json,
 )
 from tracelane.decision_orchestrator import AnalystSpec, DecisionOrchestrator
+from tracelane.runtime.base import ModelRuntime
 from tracelane.runtime.stub import DeterministicStubRuntime
 from tracelane.spine import Resolution, propose_reliability_updates
 from tracelane.spine.contracts import TypedSignal
@@ -83,23 +84,24 @@ def _run_decision(
     root: Path,
     *,
     debate_policy: DebatePolicy,
+    runtime: ModelRuntime | None = None,
 ) -> dict[str, object]:
     task, bundle = spec.task, _freeze(spec.task)
+    model = runtime if runtime is not None else DeterministicStubRuntime()
     identity = RunIdentity(
         task_sha256=sha256_json(task),
         bundle_sha256=bundle.bundle_sha256,
         config_sha256=sha256_json({"config": config, "debate_policy": debate_policy}),
-        model_id=DeterministicStubRuntime.model_id,
+        model_id=model.model_id,
         repeat=1,
     )
     store = RunStore.create(root, identity.run_id)
-    runtime = DeterministicStubRuntime()
     orchestrator = DecisionOrchestrator(identity)
     result = orchestrator.run(
         task,
         bundle,
         config,
-        runtime,
+        model,
         store,
         analysts=spec.analysts,
         resolution=spec.resolution,
@@ -157,6 +159,7 @@ def ablate_debate(
     artifacts_root: str | Path,
     *,
     seed: int = 7,
+    runtime: ModelRuntime | None = None,
 ) -> tuple[Path, dict[str, object]]:
     """Compare debate on (``always``) vs off (``never``) over a decision suite."""
     root = Path(artifacts_root).resolve(strict=False)
@@ -173,7 +176,9 @@ def ablate_debate(
     summaries = {}
     for arm, policy in arms.items():
         rows = [
-            _run_decision(spec, config, experiment_root / arm, debate_policy=policy)
+            _run_decision(
+                spec, config, experiment_root / arm, debate_policy=policy, runtime=runtime
+            )
             for spec in specs
         ]
         summaries[arm] = _summarize(rows)

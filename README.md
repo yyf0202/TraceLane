@@ -78,10 +78,12 @@ tracelane inspect --run artifacts/demo/runs/<run-id>
 
 The default demo is fully offline and does not require an API key.
 
-## Local model configuration (v0.2)
+## Local model configuration
 
-The v0.2 hosted runtime uses a private configuration that remains on the local
-machine. Copy the public template first:
+The default runtime is the offline, deterministic stub — no API key required.
+To run the same flows against a **live OpenAI-compatible model**, TraceLane
+reads a private configuration that stays on the local machine. Copy the public
+template first:
 
 ```powershell
 New-Item -ItemType Directory -Force .local | Out-Null
@@ -97,8 +99,8 @@ only.
   "protocol": "openai-compatible",
   "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
   "api_key": "replace-with-your-local-api-key",
-  "models": ["deepseek-v4-pro", "glm-5.2"],
-  "default_model": "deepseek-v4-pro"
+  "models": ["glm-5.2", "deepseek-v4-pro"],
+  "default_model": "glm-5.2"
 }
 ```
 
@@ -111,8 +113,23 @@ manifests, public runtime configs, and exports must never contain `api_key`.
 `.gitignore` is not a secret vault: rotate any key that has appeared in chat,
 logs, or Git history.
 
-The current v0.1 release does not read this file; it defines the configuration
-contract for the v0.2 hosted runtime.
+Pass `--runtime http` (and optionally `--model <id>`) to run a live model:
+
+```bash
+tracelane demo --artifacts artifacts/demo --runtime http
+tracelane eval --suite fixtures/v0.1 --artifacts artifacts/eval --runtime http --model glm-5.2
+tracelane decide ablate-debate --suite fixtures/decision-v0.1 \
+  --artifacts artifacts/decide --runtime http
+```
+
+Runs against `--runtime http` are still hash-chained and graded the same way;
+only the model changes. Live runs are non-deterministic (the provider, not the
+harness, controls generation), so run identities differ from offline stub runs.
+
+Verified against a live OpenAI-compatible endpoint (glm-5.2): the model
+abstains cleanly when evidence has no directional content, cites evidence ids
+on non-abstaining signals, and drives the full
+signal → fusion → debate → decision → outcome → feedback ledger chain.
 
 ## How it works
 

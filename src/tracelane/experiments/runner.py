@@ -12,6 +12,7 @@ from pathlib import Path
 from tracelane.artifacts import RunStore
 from tracelane.contracts import HarnessConfig, TaskSpec, canonical_json, sha256_json
 from tracelane.runner import RunResult, run_task
+from tracelane.runtime.base import ModelRuntime
 from tracelane.runtime.stub import DeterministicStubRuntime
 from tracelane.suite import load_suite
 
@@ -77,14 +78,17 @@ def evaluate_suite(
     tasks: tuple[TaskSpec, ...],
     config: HarnessConfig,
     artifacts_root: str | Path,
+    *,
+    runtime: ModelRuntime | None = None,
 ) -> dict[str, object]:
     root = _safe_root(artifacts_root)
+    model = runtime if runtime is not None else DeterministicStubRuntime()
     task_results: list[dict[str, object]] = []
     for task in tasks:
         result = run_task(
             task,
             config,
-            DeterministicStubRuntime(),
+            model,
             root,
         )
         grades = _grade_value(root, result)
@@ -155,8 +159,10 @@ def ablate_context_policy(
     artifacts_root: str | Path,
     *,
     seed: int = 7,
+    runtime: ModelRuntime | None = None,
 ) -> tuple[Path, dict[str, object]]:
     root = _safe_root(artifacts_root)
+    model = runtime if runtime is not None else DeterministicStubRuntime()
     arms = {
         "control": HarnessConfig(context_policy="raw", seed=seed),
         "treatment": HarnessConfig(context_policy="pit_budgeted", seed=seed),
@@ -167,7 +173,7 @@ def ablate_context_policy(
             "suite_sha256": suite_sha256,
             "variable": "context_policy",
             "arms": arms,
-            "model_id": DeterministicStubRuntime.model_id,
+            "model_id": model.model_id,
             "seed": seed,
         }
     )[:16]
@@ -178,14 +184,15 @@ def ablate_context_policy(
         "suite_sha256": suite_sha256,
         "variable": "context_policy",
         "arms": {name: asdict(config) for name, config in arms.items()},
-        "model_id": DeterministicStubRuntime.model_id,
+        "model_id": model.model_id,
         "seed": seed,
         "code_commit": _code_commit(),
         "started_at": datetime.now(UTC),
     }
     _write_json(experiment_root / "experiment.json", experiment)
     summaries = {
-        name: evaluate_suite(tasks, config, experiment_root / name) for name, config in arms.items()
+        name: evaluate_suite(tasks, config, experiment_root / name, runtime=model)
+        for name, config in arms.items()
     }
     summary = {
         "experiment_id": experiment_id,
