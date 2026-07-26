@@ -36,7 +36,10 @@ def test_fuse_requires_signals() -> None:
 def test_fuse_requires_shared_subject() -> None:
     a = signal("a", "bullish", 0.8, ("ev_1",))
     b = TypedSignal.create(
-        analyst_id="b", subject="OTHER", direction="bullish", confidence=0.8,
+        analyst_id="b",
+        subject="OTHER",
+        direction="bullish",
+        confidence=0.8,
         evidence_ids=("ev_1",),
     )
     with pytest.raises(ValueError, match="same subject"):
@@ -171,9 +174,7 @@ def test_debate_conditional_triggers_on_disagreement() -> None:
             signal("b", "bearish", 0.9, ("ev_2",)),
         )
     )
-    decision = should_debate(
-        fusion, policy="conditional", disagreement_threshold=0.5
-    )
+    decision = should_debate(fusion, policy="conditional", disagreement_threshold=0.5)
     assert fusion.disagreement >= 0.5
     assert decision.should_debate is True
 

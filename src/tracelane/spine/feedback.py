@@ -137,7 +137,6 @@ def attribute_feedback(
     if outcome.decision_id != decision.decision_id:
         raise ValueError("outcome does not belong to this decision")
     signals = tuple(signals)
-    by_id = {signal.signal_id: signal for signal in signals}
     signal_directions = {
         signal.signal_id: signal.direction
         for signal in signals
@@ -167,9 +166,7 @@ def attribute_feedback(
     if not signal_directions:
         data_quality_gaps.append("no analyst signal had evidence references")
     if fusion.abstained_analysts:
-        data_quality_gaps.append(
-            f"{len(fusion.abstained_analysts)} analyst(s) abstained"
-        )
+        data_quality_gaps.append(f"{len(fusion.abstained_analysts)} analyst(s) abstained")
     if outcome.status == "invalid":
         data_quality_gaps.append("outcome could not be resolved")
 
@@ -256,7 +253,9 @@ def propose_reliability_updates(
                 candidate_value=round(shrunk(wins, n), 6),
                 sample_size=n,
                 status="requires_walk_forward",
-                reason="shrunk directional reliability; candidate only until frozen validation passes",
+                reason=(
+                    "shrunk directional reliability; candidate only until frozen validation passes"
+                ),
             )
         )
     return proposals

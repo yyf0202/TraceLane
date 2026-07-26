@@ -13,7 +13,9 @@ from tracelane.spine import (
 )
 
 
-def signal(analyst: str, direction: str, confidence: float, evidence: tuple[str, ...]) -> TypedSignal:
+def signal(
+    analyst: str, direction: str, confidence: float, evidence: tuple[str, ...]
+) -> TypedSignal:
     return TypedSignal.create(
         analyst_id=analyst,
         subject="SUBJ",
@@ -47,7 +49,9 @@ def test_resolve_requires_matching_subject() -> None:
 def test_resolve_observed_produces_factual_outcome() -> None:
     signals = (signal("a", "bullish", 0.9, ("ev_1",)),)
     decision, fusion = decided(signals)
-    resolution = Resolution(subject="SUBJ", actual_direction="bullish", metric_name="net_alpha", metric_value=0.03)
+    resolution = Resolution(
+        subject="SUBJ", actual_direction="bullish", metric_name="net_alpha", metric_value=0.03
+    )
     outcome = resolve_decision(decision, fusion, resolution)
     assert outcome.status == "observed"
     assert outcome.metric_name == "net_alpha"
@@ -70,7 +74,9 @@ def test_feedback_marks_correct_direction() -> None:
         signal("b", "bullish", 0.8, ("ev_2",)),
     )
     decision, fusion = decided(signals)
-    resolution = Resolution(subject="SUBJ", actual_direction="bullish", metric_name="net_alpha", metric_value=0.02)
+    resolution = Resolution(
+        subject="SUBJ", actual_direction="bullish", metric_name="net_alpha", metric_value=0.02
+    )
     outcome = resolve_decision(decision, fusion, resolution)
     feedback = attribute_feedback(decision, fusion, signals, outcome, resolution)
     assert feedback.decision_correct is True
@@ -85,7 +91,9 @@ def test_feedback_attributes_signal_level_blame() -> None:
     )
     decision, fusion = decided(signals)
     # World goes up: the bullish analyst is right, the bearish one wrong.
-    resolution = Resolution(subject="SUBJ", actual_direction="bullish", metric_name="net_alpha", metric_value=0.02)
+    resolution = Resolution(
+        subject="SUBJ", actual_direction="bullish", metric_name="net_alpha", metric_value=0.02
+    )
     outcome = resolve_decision(decision, fusion, resolution)
     feedback = attribute_feedback(decision, fusion, signals, outcome, resolution)
     by_analyst = {s.analyst_id: s.signal_id for s in signals}
@@ -96,7 +104,9 @@ def test_feedback_attributes_signal_level_blame() -> None:
 def test_feedback_flags_direction_miss_failure_mode() -> None:
     signals = (signal("a", "bullish", 0.95, ("ev_1",)),)
     decision, fusion = decided(signals)
-    resolution = Resolution(subject="SUBJ", actual_direction="bearish", metric_name="net_alpha", metric_value=-0.04)
+    resolution = Resolution(
+        subject="SUBJ", actual_direction="bearish", metric_name="net_alpha", metric_value=-0.04
+    )
     outcome = resolve_decision(decision, fusion, resolution)
     feedback = attribute_feedback(decision, fusion, signals, outcome, resolution)
     assert feedback.decision_correct is False
@@ -119,7 +129,9 @@ def test_feedback_requires_matching_decision() -> None:
     decision, fusion = decided(signals)
     other_signals = (signal("a", "bearish", 0.9, ("ev_9",)),)
     other_decision, _ = decided(other_signals, final="sell")
-    resolution = Resolution(subject="SUBJ", actual_direction="bullish", metric_name="r", metric_value=0.01)
+    resolution = Resolution(
+        subject="SUBJ", actual_direction="bullish", metric_name="r", metric_value=0.01
+    )
     outcome = resolve_decision(other_decision, fusion, resolution)
     with pytest.raises(ValueError, match="does not belong"):
         attribute_feedback(decision, fusion, signals, outcome, resolution)
@@ -137,9 +149,7 @@ def test_reliability_requires_min_samples() -> None:
 
 def test_reliability_shrinks_toward_prior() -> None:
     # 40/40 correct would be 1.0 without a prior; shrinkage pulls it below.
-    attributions = tuple(
-        (signal("a", "bullish", 0.9, (f"ev_{i}",)), True) for i in range(40)
-    )
+    attributions = tuple((signal("a", "bullish", 0.9, (f"ev_{i}",)), True) for i in range(40))
     proposals = propose_reliability_updates(attributions, min_samples=30, prior_strength=20)
     assert proposals[0].status == "requires_walk_forward"
     assert proposals[0].candidate_value is not None
@@ -148,17 +158,19 @@ def test_reliability_shrinks_toward_prior() -> None:
 
 def test_reliability_skips_abstained_signals() -> None:
     abstained = TypedSignal.create(
-        analyst_id="lazy", subject="SUBJ", direction="abstain", confidence=0.0,
-        abstained=True, abstain_reason="no data",
+        analyst_id="lazy",
+        subject="SUBJ",
+        direction="abstain",
+        confidence=0.0,
+        abstained=True,
+        abstain_reason="no data",
     )
     proposals = propose_reliability_updates(((abstained, True),), min_samples=1)
     assert proposals == []
 
 
 def test_reliability_is_deterministic() -> None:
-    attributions = tuple(
-        (signal("a", "bullish", 0.9, (f"ev_{i}",)), i % 3 != 0) for i in range(35)
-    )
+    attributions = tuple((signal("a", "bullish", 0.9, (f"ev_{i}",)), i % 3 != 0) for i in range(35))
     first = propose_reliability_updates(attributions, min_samples=30)
     second = propose_reliability_updates(attributions, min_samples=30)
     assert [p.to_dict() for p in first] == [p.to_dict() for p in second]

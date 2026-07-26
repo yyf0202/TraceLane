@@ -23,7 +23,11 @@ def fullflow(decision: str = "Hold") -> dict[str, object]:
             "fundamentals_report": "fundamentals " * 350,
             "industry_report": "industry " * 1500,
             "investment_debate": {"bull_history": "bull " * 500, "bear_history": "bear " * 540},
-            "risk_debate": {"aggressive_history": "a " * 200, "conservative_history": "c " * 250, "neutral_history": "n " * 220},
+            "risk_debate": {
+                "aggressive_history": "a " * 200,
+                "conservative_history": "c " * 250,
+                "neutral_history": "n " * 220,
+            },
         },
     }
 
@@ -52,7 +56,11 @@ def test_distill_produces_sanitized_task(tmp_path: Path) -> None:
     assert task["task_id"].startswith("SHOWCASE-")
     # Structure preserved.
     assert [a["analyst_id"] for a in task["analysts"]] == [
-        "market", "social", "news", "fundamentals", "industry",
+        "market",
+        "social",
+        "news",
+        "fundamentals",
+        "industry",
     ]
     assert len(task["evidence"]) == 5
     # Prose is synthetic, tagged by source type only.

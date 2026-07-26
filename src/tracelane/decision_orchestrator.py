@@ -115,8 +115,17 @@ class DecisionOrchestrator:
         )
         fusion = self._fuse(trace, checkpoints, signals, subject, analysts, state, completed)
         debated, fusion = self._maybe_debate(
-            trace, checkpoints, runtime, task, config, context, signals, fusion, debate_policy,
-            state, completed,
+            trace,
+            checkpoints,
+            runtime,
+            task,
+            config,
+            context,
+            signals,
+            fusion,
+            debate_policy,
+            state,
+            completed,
         )
         decision = self._decide(
             trace, checkpoints, ledger, task, signals, fusion, subject, state, completed
@@ -154,7 +163,11 @@ class DecisionOrchestrator:
         def op() -> tuple[tuple[EvidenceRecord, ...], tuple[str, ...]]:
             if config.context_policy == "raw":
                 return (
-                    tuple(sorted(task.evidence, key=lambda item: (item.available_at, item.evidence_id))),
+                    tuple(
+                        sorted(
+                            task.evidence, key=lambda item: (item.available_at, item.evidence_id)
+                        )
+                    ),
                     (),
                 )
             admitted: list[EvidenceRecord] = []

@@ -39,7 +39,6 @@ from tracelane.runtime.stub import DeterministicStubRuntime
 from tracelane.spine import Resolution, propose_reliability_updates
 from tracelane.spine.contracts import TypedSignal
 from tracelane.spine.debate import DebatePolicy
-from tracelane.spine.feedback import stance_from_score  # deterministic stance label
 from tracelane.spine.fusion import fuse_signals
 
 
@@ -263,7 +262,9 @@ def ablate_feedback_loop(
                     subject=spec.task.task_id,
                     direction=("abstain" if a.abstains else a.direction_hint),  # type: ignore[arg-type]
                     confidence=(0.0 if a.abstains else a.confidence_hint),
-                    evidence_ids=(() if a.abstains else tuple(r.evidence_id for r in bundle.records)),
+                    evidence_ids=(
+                        () if a.abstains else tuple(r.evidence_id for r in bundle.records)
+                    ),
                     abstained=a.abstains,
                     abstain_reason="no data" if a.abstains else None,
                     model_id=DeterministicStubRuntime.model_id,
@@ -299,9 +300,7 @@ def ablate_feedback_loop(
             per_round.append(accuracy)
             all_attributions.extend(attributions)
             if arm == "self_improving":
-                proposals = propose_reliability_updates(
-                    all_attributions, min_samples=min_samples
-                )
+                proposals = propose_reliability_updates(all_attributions, min_samples=min_samples)
                 reliability = {
                     proposal.analyst_id: proposal.candidate_value
                     for proposal in proposals

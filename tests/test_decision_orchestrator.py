@@ -105,8 +105,13 @@ def test_decision_chain_full_loop_with_resolution(tmp_path: Path) -> None:
         subject="DEC-001", actual_direction="bullish", metric_name="net_alpha", metric_value=0.03
     )
     result = orch.run(
-        task, bundle, config, DeterministicStubRuntime(), store,
-        analysts=bullish_bearish(), resolution=resolution,
+        task,
+        bundle,
+        config,
+        DeterministicStubRuntime(),
+        store,
+        analysts=bullish_bearish(),
+        resolution=resolution,
     )
     kinds = [entry.kind for entry in Ledger(store).entries()]
     assert kinds == ["signal", "signal", "decision", "outcome", "feedback"]
@@ -139,8 +144,13 @@ def test_abstaining_analyst_abstains_with_reason(tmp_path: Path) -> None:
 def test_debate_policy_always_marks_debated(tmp_path: Path) -> None:
     task, bundle, config, identity, store, orch = make_setup(tmp_path, bullish_bearish())
     result = orch.run(
-        task, bundle, config, DeterministicStubRuntime(), store,
-        analysts=bullish_bearish(), debate_policy="always",
+        task,
+        bundle,
+        config,
+        DeterministicStubRuntime(),
+        store,
+        analysts=bullish_bearish(),
+        debate_policy="always",
     )
     assert result.debated is True
 
@@ -148,8 +158,13 @@ def test_debate_policy_always_marks_debated(tmp_path: Path) -> None:
 def test_debate_policy_never_skips(tmp_path: Path) -> None:
     task, bundle, config, identity, store, orch = make_setup(tmp_path, bullish_bearish())
     result = orch.run(
-        task, bundle, config, DeterministicStubRuntime(), store,
-        analysts=bullish_bearish(), debate_policy="never",
+        task,
+        bundle,
+        config,
+        DeterministicStubRuntime(),
+        store,
+        analysts=bullish_bearish(),
+        debate_policy="never",
     )
     assert result.debated is False
 
@@ -162,8 +177,13 @@ def test_conflicting_signals_trigger_conditional_debate(tmp_path: Path) -> None:
     )
     task, bundle, config, identity, store, orch = make_setup(tmp_path, analysts)
     result = orch.run(
-        task, bundle, config, DeterministicStubRuntime(), store,
-        analysts=analysts, debate_policy="conditional",
+        task,
+        bundle,
+        config,
+        DeterministicStubRuntime(),
+        store,
+        analysts=analysts,
+        debate_policy="conditional",
     )
     assert result.fusion.disagreement > 0.5
     assert result.debated is True
@@ -175,10 +195,24 @@ def test_deterministic_across_reruns(tmp_path: Path) -> None:
     resolution = Resolution(
         subject="DEC-001", actual_direction="bullish", metric_name="net_alpha", metric_value=0.02
     )
-    r1 = first[5].run(first[0], first[1], first[2], DeterministicStubRuntime(), first[4],
-                     analysts=bullish_bearish(), resolution=resolution)
-    r2 = second[5].run(second[0], second[1], second[2], DeterministicStubRuntime(), second[4],
-                       analysts=bullish_bearish(), resolution=resolution)
+    r1 = first[5].run(
+        first[0],
+        first[1],
+        first[2],
+        DeterministicStubRuntime(),
+        first[4],
+        analysts=bullish_bearish(),
+        resolution=resolution,
+    )
+    r2 = second[5].run(
+        second[0],
+        second[1],
+        second[2],
+        DeterministicStubRuntime(),
+        second[4],
+        analysts=bullish_bearish(),
+        resolution=resolution,
+    )
     assert r1.decision.decision_id == r2.decision.decision_id
     assert [s.signal_id for s in r1.signals] == [s.signal_id for s in r2.signals]
 

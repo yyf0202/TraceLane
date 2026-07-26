@@ -87,14 +87,12 @@ def _request():
 
 
 def test_complete_parses_content_and_usage() -> None:
+    content = (
+        '{"direction": "bullish", "confidence": 0.7, "evidence_ids": ["ev1"], '
+        '"abstained": false, "abstain_reason": null}'
+    )
     body = {
-        "choices": [
-            {
-                "message": {
-                    "content": '{"direction": "bullish", "confidence": 0.7, "evidence_ids": ["ev1"], "abstained": false, "abstain_reason": null}'
-                }
-            }
-        ],
+        "choices": [{"message": {"content": content}}],
         "usage": {"prompt_tokens": 123, "completion_tokens": 45},
     }
     runtime = _FakeRuntime(_config(), body)

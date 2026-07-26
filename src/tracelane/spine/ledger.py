@@ -27,7 +27,6 @@ from tracelane.spine.contracts import (
     DecisionRecord,
     FeedbackRecord,
     OutcomeRecord,
-    TypedSignal,
 )
 
 LEDGER_NAME = "spine/ledger.jsonl"
@@ -169,9 +168,7 @@ class Ledger:
             previous_sha256=previous_sha256,
             entry_sha256="",
         )
-        entry = LedgerEntry(
-            **{**entry.__dict__, "entry_sha256": sha256_json(entry.content_dict())}
-        )
+        entry = LedgerEntry(**{**entry.__dict__, "entry_sha256": sha256_json(entry.content_dict())})
         self._store.append_jsonl(LEDGER_NAME, entry.to_dict())
         return entry
 
@@ -200,9 +197,7 @@ class Ledger:
                 raise ValueError("feedback references an unknown outcome")
             unknown_signals = set(record.per_signal_verdicts) - seen["signal"]
             if unknown_signals:
-                raise ValueError(
-                    f"feedback references unknown signals: {sorted(unknown_signals)}"
-                )
+                raise ValueError(f"feedback references unknown signals: {sorted(unknown_signals)}")
 
     def entries(self, kind: str | None = None) -> tuple[LedgerEntry, ...]:
         """Return verified entries, optionally filtered by record kind."""

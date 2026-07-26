@@ -68,7 +68,7 @@ _STAGE_INSTRUCTIONS: dict[str, str] = {
         'keys: "direction" (one of "bullish", "bearish", "neutral"), '
         '"confidence" (0..1), "evidence_ids" (array of cited evidence ids), '
         '"abstained" (boolean), "abstain_reason" (string or null). '
-        "If you have no usable evidence, set abstained=true, direction=\"abstain\", "
+        'If you have no usable evidence, set abstained=true, direction="abstain", '
         "confidence=0, and explain in abstain_reason. Otherwise cite at least one "
         "evidence id and keep confidence above 0."
     ),
@@ -112,7 +112,10 @@ def _build_messages(request: ModelRequest) -> list[dict[str, str]]:
     }
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": f"{stage_instruction}\n\nInput JSON:\n{canonical_json(user_payload)}"},
+        {
+            "role": "user",
+            "content": f"{stage_instruction}\n\nInput JSON:\n{canonical_json(user_payload)}",
+        },
     ]
 
 
@@ -217,7 +220,7 @@ class OpenAICompatibleRuntime:
             except (urllib.error.URLError, ValueError, KeyError, json.JSONDecodeError) as exc:
                 last_error = exc
                 if attempt < attempts:
-                    time.sleep(min(2.0 ** attempt, 8.0))
+                    time.sleep(min(2.0**attempt, 8.0))
         raise ValueError(
             f"model request failed after {attempts} attempt(s): {last_error}"
         ) from last_error

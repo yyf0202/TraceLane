@@ -99,9 +99,7 @@ def test_outcome_observed_requires_metric(tmp_path: Path) -> None:
 
 def test_outcome_invalid_requires_reason_and_no_metric() -> None:
     with pytest.raises(ValueError, match="invalid_reason"):
-        OutcomeRecord.create(
-            decision_id="dec_" + "0" * 32, subject="SUBJ", status="invalid"
-        )
+        OutcomeRecord.create(decision_id="dec_" + "0" * 32, subject="SUBJ", status="invalid")
     with pytest.raises(ValueError, match="cannot carry a metric"):
         OutcomeRecord.create(
             decision_id="dec_" + "0" * 32,
@@ -113,7 +111,9 @@ def test_outcome_invalid_requires_reason_and_no_metric() -> None:
         )
 
 
-def _full_chain(ledger: Ledger) -> tuple[TypedSignal, DecisionRecord, OutcomeRecord, FeedbackRecord]:
+def _full_chain(
+    ledger: Ledger,
+) -> tuple[TypedSignal, DecisionRecord, OutcomeRecord, FeedbackRecord]:
     signal = append_signal(ledger)
     decision = DecisionRecord.create(
         subject="SUBJ",
@@ -149,7 +149,7 @@ def test_ledger_appends_and_chains(tmp_path: Path) -> None:
     entries = ledger.entries()
     assert [entry.kind for entry in entries] == ["signal", "decision", "outcome", "feedback"]
     assert entries[0].previous_sha256 is None
-    for previous, current in zip(entries, entries[1:]):
+    for previous, current in zip(entries, entries[1:], strict=False):
         assert current.previous_sha256 == previous.entry_sha256
     assert [entry.sequence for entry in entries] == [1, 2, 3, 4]
 

@@ -51,7 +51,9 @@ def _bounded(value: float, label: str, *, low: float = 0.0, high: float = 1.0) -
     return numeric
 
 
-def _unique_strings(value: tuple[str, ...], label: str, *, required: bool = False) -> tuple[str, ...]:
+def _unique_strings(
+    value: tuple[str, ...], label: str, *, required: bool = False
+) -> tuple[str, ...]:
     items = tuple(value)
     if required and not items:
         raise ValueError(f"{label} must not be empty")
@@ -92,9 +94,7 @@ class TypedSignal:
         if self.direction not in _DIRECTIONS:
             raise ValueError("direction is invalid")
         object.__setattr__(self, "confidence", _bounded(self.confidence, "confidence"))
-        object.__setattr__(
-            self, "evidence_ids", _unique_strings(self.evidence_ids, "evidence_ids")
-        )
+        object.__setattr__(self, "evidence_ids", _unique_strings(self.evidence_ids, "evidence_ids"))
         if self.model_id is not None:
             object.__setattr__(self, "model_id", _non_empty(self.model_id, "model_id"))
         if self.abstained:
@@ -184,11 +184,11 @@ class DecisionRecord:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "subject", _non_empty(self.subject, "subject"))
-        object.__setattr__(self, "final_decision", _non_empty(self.final_decision, "final_decision"))
-        object.__setattr__(self, "signal_ids", _unique_strings(self.signal_ids, "signal_ids"))
         object.__setattr__(
-            self, "evidence_ids", _unique_strings(self.evidence_ids, "evidence_ids")
+            self, "final_decision", _non_empty(self.final_decision, "final_decision")
         )
+        object.__setattr__(self, "signal_ids", _unique_strings(self.signal_ids, "signal_ids"))
+        object.__setattr__(self, "evidence_ids", _unique_strings(self.evidence_ids, "evidence_ids"))
         object.__setattr__(
             self,
             "abstained_analysts",

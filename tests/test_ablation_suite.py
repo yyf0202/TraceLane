@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -14,8 +13,14 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "generate_ablation_su
 def generate(tmp_path: Path, seed: int = 7, tasks: int = 12, **kwargs: object) -> Path:
     out = tmp_path / "suite"
     cmd = [
-        sys.executable, str(SCRIPT), "--out", str(out),
-        "--seed", str(seed), "--tasks", str(tasks),
+        sys.executable,
+        str(SCRIPT),
+        "--out",
+        str(out),
+        "--seed",
+        str(seed),
+        "--tasks",
+        str(tasks),
     ]
     for key, value in kwargs.items():
         cmd += [f"--{key.replace('_', '-')}", str(value)]

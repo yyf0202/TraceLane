@@ -110,8 +110,7 @@ def _build_task(
                 "fact_ids": [f"fact-{analyst_id}"],
                 "source": f"tracelane-synthetic-{analyst_id}",
                 "text": (
-                    f"Synthetic {analyst_id} note for {task_id}: "
-                    f"leans {spec['direction_hint']}."
+                    f"Synthetic {analyst_id} note for {task_id}: leans {spec['direction_hint']}."
                 ),
             }
         )

@@ -139,9 +139,7 @@ def distill(fullflow: Mapping[str, object], subject_id: str) -> dict[str, object
         # A hold is a standoff: split the roster so weighted conviction cancels.
         directions = _balanced_split([(a, confidences[a]) for a in analysts])
     else:
-        directions = {
-            a: _direction_for(final_direction, bull_chars, bear_chars) for a in analysts
-        }
+        directions = {a: _direction_for(final_direction, bull_chars, bear_chars) for a in analysts}
 
     trade_date = str(state.get("trade_date", "2026-01-01"))
     cutoff = f"{trade_date}T15:00:00+08:00"
@@ -204,18 +202,24 @@ def distill(fullflow: Mapping[str, object], subject_id: str) -> dict[str, object
 
 def _subject_id(fullflow: Mapping[str, object], index: int) -> str:
     """Derive a stable synthetic subject id from the run, never the ticker."""
-    digest = hashlib.sha256(
-        json.dumps(
-            [fullflow.get("date"), fullflow.get("selected_analysts"), fullflow.get("decision")],
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()[:6].upper()
+    digest = (
+        hashlib.sha256(
+            json.dumps(
+                [fullflow.get("date"), fullflow.get("selected_analysts"), fullflow.get("decision")],
+                sort_keys=True,
+            ).encode("utf-8")
+        )
+        .hexdigest()[:6]
+        .upper()
+    )
     return f"SHOWCASE-{index:03d}-{digest}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("fullflow", type=Path, nargs="+", help="TradingAgents fullflow JSON trace(s)")
+    parser.add_argument(
+        "fullflow", type=Path, nargs="+", help="TradingAgents fullflow JSON trace(s)"
+    )
     parser.add_argument(
         "--out",
         type=Path,
