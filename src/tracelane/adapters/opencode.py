@@ -122,7 +122,7 @@ def _trace_event_type(event_type: str) -> str:
         "tool.execute.after": "tool.observed",
         "context.compaction.selected": "context.selected",
         "session.compacting": "context.selected",
-    }.get(event_type, "model.observed")
+    }.get(event_type, "opencode.event")
 
 
 def _stage(event_type: str) -> str | None:

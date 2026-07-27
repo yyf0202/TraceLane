@@ -45,3 +45,31 @@ def test_import_opencode_session_freezes_and_normalizes_trace(tmp_path: Path) ->
         "run.completed",
     ]
     assert (store.run_dir / "input" / "opencode-session.json").exists()
+
+
+def test_import_preserves_unmapped_opencode_events(tmp_path: Path) -> None:
+    source = tmp_path / "session.jsonl"
+    source.write_text(
+        json.dumps(
+            {
+                "schema": "tracelane-opencode-observation/v0.1",
+                "observed_at": "2026-07-27T00:00:00Z",
+                "type": "opencode.event",
+                "session_id": "ses_test",
+                "payload": {"event": {"type": "session.status"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    store = import_opencode_session(
+        load_opencode_session(source),
+        tmp_path / "artifacts",
+        harness_config={"context_policy": "retrieval"},
+        code_revision="test-revision",
+    )
+    events = [
+        json.loads(line)
+        for line in (store.run_dir / "trace" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[1]["event_type"] == "opencode.event"
