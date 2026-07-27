@@ -1,0 +1,12 @@
+{
+  "schema_version": "frozen-coding-suite/v0.1",
+  "suite_id": "bericher-v0.7",
+  "repository_id": "BeRicher_v0.45",
+  "tasks": [
+    "../bericher-v0.6/tasks/BR-06-adv10-holding-exemption-v2.json",
+    "tasks/BR-07-factorvae-crash-resilience-v2.json",
+    "../bericher-v0.5/tasks/BR-08-simulation-catchup.json",
+    "../bericher-v0.5/tasks/BR-09-v5-simulation-routing.json"
+  ],
+  "notes": "BR-07 v2 replaces internal-name and source-shape assertions with output-bound, config/CLI round-trip, and implementation-equivalent checkpoint/metadata checks. BR-07 v1 and its Day 2 raw scores remain frozen."
+}

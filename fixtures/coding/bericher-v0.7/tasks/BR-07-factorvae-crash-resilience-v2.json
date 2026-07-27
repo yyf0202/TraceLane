@@ -1,0 +1,54 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-07-factorvae-crash-resilience",
+  "version": 2,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "598b3912dbe0cd7f0a4bf8fbe2c6eb04ac445579",
+    "tree_sha256": "88fa54c5d0a968b2dd6f9db182dd2cf2d36f0c258774f8f3ec91e7df1db26635"
+  },
+  "objective": "Prevent cross-sectional FactorVAE factor variance inflation and make long K-fold training recoverable. Add a factor_logvar_max bound distinct from the broad KL numerical bound and observation-noise bound, apply it to both prior and posterior factor heads, and propagate it through config, model kwargs, and a CLI option defaulting to 2.0. Save a loadable fold checkpoint after every epoch without turning checkpoint I/O failure into training failure, and write partial kfold metadata before fold training begins.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile src/components/models.py src/cli/factorvae_cs_train.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br07_v2_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"cef098b1180a9cd12243424e28ec828a13b3d4df58a7d4dd1696c524cb5161e1\" && /Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br07_v2_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "src/components/models.py",
+      "src/cli/factorvae_cs_train.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**",
+      "outputs/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg",
+    "sed",
+    "/Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  }
+}
