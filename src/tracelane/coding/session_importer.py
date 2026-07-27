@@ -125,10 +125,10 @@ def import_coding_attempt(
         if plan_artifact.plan_session_id != root_session_id:
             raise ValueError("plan artifact session must be the attempt root")
         if not any(
-            item.ref.parent_session_id == root_session_id and item.ref.agent_kind == "build"
+            item.ref.session_id == root_session_id and item.ref.agent_kind == "plan"
             for item in sessions
         ):
-            raise ValueError("plan artifact requires a linked build child session")
+            raise ValueError("plan artifact requires a plan root session")
     config = json.loads(canonical_json(harness_config))
     session_digest = sha256_json(
         [

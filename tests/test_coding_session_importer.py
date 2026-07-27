@@ -159,7 +159,7 @@ def test_plan_artifact_is_bound_to_root_and_frozen_with_attempt(tmp_path: Path) 
     assert frozen["plan_session_id"] == "ses_plan"
 
 
-def test_plan_artifact_requires_a_build_child(tmp_path: Path) -> None:
+def test_plan_artifact_is_preserved_when_gate_blocks_build(tmp_path: Path) -> None:
     root = session("ses_plan", "2026-07-27T00:00:00Z", "chat.message")
     content = "Plan."
     plan = PlanArtifact(
@@ -169,19 +169,48 @@ def test_plan_artifact_requires_a_build_child(tmp_path: Path) -> None:
         content_sha256=hashlib.sha256(content.encode()).hexdigest(),
         source_cli_sha256="a" * 64,
     )
+    store = import_coding_attempt(
+        task(),
+        attempt_id="attempt-plan-only",
+        sessions=(AttemptSession(SessionRef("ses_plan", "ses_plan", None, "plan"), root),),
+        initial_workspace=snapshot(),
+        final_workspace=snapshot(),
+        end=AttemptEnd(reason="blocked", final_answer="Plan gate blocked build."),
+        artifact_root=tmp_path,
+        harness_config={"workflow": "plan-build", "build_started": False},
+        plan_artifact=plan,
+    )
+
+    frozen = json.loads((store.run_dir / "input" / "plan.json").read_text())
+    assert frozen["content_sha256"] == plan.content_sha256
+    assert not (store.run_dir / "input" / "sessions" / "ses_build.json").exists()
+
+
+def test_plan_artifact_rejects_non_plan_root(tmp_path: Path) -> None:
+    root = session("ses_build", "2026-07-27T00:00:00Z", "chat.message")
+    content = "Plan."
+    plan = PlanArtifact(
+        task_sha256=task().task_sha256,
+        plan_session_id="ses_build",
+        content=content,
+        content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+        source_cli_sha256="a" * 64,
+    )
     try:
         import_coding_attempt(
             task(),
-            attempt_id="attempt-plan-only",
-            sessions=(AttemptSession(SessionRef("ses_plan", "ses_plan", None, "plan"), root),),
+            attempt_id="attempt-wrong-root",
+            sessions=(
+                AttemptSession(SessionRef("ses_build", "ses_build", None, "build"), root),
+            ),
             initial_workspace=snapshot(),
             final_workspace=snapshot(),
-            end=AttemptEnd(reason="completed", final_answer="Done."),
+            end=AttemptEnd(reason="blocked", final_answer=None),
             artifact_root=tmp_path,
-            harness_config={"workflow": "plan-build"},
+            harness_config={},
             plan_artifact=plan,
         )
     except ValueError as exc:
-        assert "build child" in str(exc)
+        assert "plan root" in str(exc)
     else:
-        raise AssertionError("plan-only attempt must not accept a plan artifact")
+        raise AssertionError("plan artifact must be bound to a plan root")

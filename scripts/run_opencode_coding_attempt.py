@@ -140,14 +140,33 @@ def _consume(
 
 
 def _terminate(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
     try:
         os.killpg(process.pid, signal.SIGTERM)
         process.wait(timeout=10)
-    except ProcessLookupError:
-        return
+    except (PermissionError, ProcessLookupError):
+        if process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=10)
+        except (PermissionError, ProcessLookupError):
+            return
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+                process.wait()
+            except (PermissionError, ProcessLookupError):
+                return
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+        except (PermissionError, ProcessLookupError):
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
 
 def main() -> int:

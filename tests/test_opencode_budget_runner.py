@@ -4,10 +4,19 @@ import json
 import os
 import subprocess
 import sys
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "scripts" / "run_opencode_coding_attempt.py"
+
+
+def _runner_module():
+    spec = spec_from_file_location("run_opencode_coding_attempt", RUNNER)
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _fake_binary(path: Path, *, token_count: int) -> Path:
@@ -134,3 +143,24 @@ def test_runner_enforces_wall_budget(tmp_path: Path) -> None:
     )
     assert termination["source"] == "local_budget"
     assert termination["reason"] == "wall_budget_exhausted"
+
+
+def test_terminate_tolerates_process_exit_before_group_signal(monkeypatch) -> None:
+    runner = _runner_module()
+
+    class ExitedDuringSignal:
+        pid = 123
+        polls = 0
+
+        def poll(self):
+            self.polls += 1
+            return None if self.polls == 1 else 0
+
+    process = ExitedDuringSignal()
+
+    def denied(_pid, _signal):
+        raise PermissionError
+
+    monkeypatch.setattr(runner.os, "killpg", denied)
+    runner._terminate(process)
+    assert process.poll() == 0
