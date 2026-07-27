@@ -1,0 +1,55 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-05-t1-causality-alignment",
+  "version": 3,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "b45f16b0864aff9a557ae05524071dae0e8b03a1",
+    "tree_sha256": "e87caf4c079d34137654ceb0744e2d4e1e9579233c680f652121bbc8dbd69093"
+  },
+  "objective": "Eliminate look-ahead across the Transformer training and backtest path. A signal produced after market close on T must execute against T+1 market data, with no first-day trade; ranking and OHLC labels must represent the matching T+1-to-T+2 holding interval. FiLM static context and its gamma/beta tensors must retain the time dimension and modulate the matching dynamic timestep; a [B,1,D] parameter broadcast is not stepwise static modulation. Bottleneck fusion must use causal sequence context rather than the window's last static row. Preserve daily settlement, NAV recording, order accounting, public interfaces, and existing output shapes.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile src/backtest/engine.py src/components/models.py src/components/target_generator.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br05_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"91886094ffeb5205aa915162f6bf7cff333b288428deb783137771d367184fcf\" && /Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br05_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "src/backtest/engine.py",
+      "src/components/models.py",
+      "src/components/target_generator.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**",
+      "outputs/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg",
+    "sed",
+    "/Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  }
+}

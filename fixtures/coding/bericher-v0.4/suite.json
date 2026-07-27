@@ -1,0 +1,13 @@
+{
+  "schema_version": "frozen-coding-suite/v0.1",
+  "suite_id": "bericher-v0.4",
+  "repository_id": "BeRicher_v0.45",
+  "tasks": [
+    "../bericher-v0.2/tasks/BR-01-pit-value-date-v2.json",
+    "../bericher-v0.1/tasks/BR-02-expanded-static-detection.json",
+    "../bericher-v0.1/tasks/BR-03-auto-compact-daily-run.json",
+    "../bericher-v0.1/tasks/BR-04-expanded-static-inference.json",
+    "tasks/BR-05-t1-causality-alignment-v3.json"
+  ],
+  "notes": "Keeps the BR-05 v2 implementation grader and budget while tightening the independent plan gate: FiLM plans must preserve time-shaped static context and gamma/beta instead of calling a singleton broadcast stepwise modulation."
+}
