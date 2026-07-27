@@ -1,0 +1,13 @@
+{
+  "schema_version": "frozen-coding-suite/v0.1",
+  "suite_id": "bericher-v0.2",
+  "repository_id": "BeRicher_v0.45",
+  "tasks": [
+    "tasks/BR-01-pit-value-date-v2.json",
+    "../bericher-v0.1/tasks/BR-02-expanded-static-detection.json",
+    "../bericher-v0.1/tasks/BR-03-auto-compact-daily-run.json",
+    "../bericher-v0.1/tasks/BR-04-expanded-static-inference.json",
+    "tasks/BR-05-t1-causality-alignment.json"
+  ],
+  "notes": "Extends the immutable v0.1 catalog with a legacy-pandas compatibility profile for BR-01 and BR-05, a high-complexity causal-alignment task spanning the backtest engine, target generation, and Transformer static-feature fusion. BR-05 excludes data and generated-state paths."
+}
