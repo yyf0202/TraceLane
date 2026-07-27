@@ -57,6 +57,9 @@ def diagnose_last_provider_turn(
         state = "gateway_no_response_headers"
     if "provider.http.response.headers" in types:
         state = "gateway_no_first_token"
+    http_status = _last_payload_integer(rows, "provider.http.response.headers", "status")
+    if http_status is not None and not 200 <= http_status < 300:
+        state = "provider_rejected_before_stream"
     if "model.response.first_chunk" in types:
         state = "stream_interrupted"
     stream_failed = bool({"model.stream.error", "model.stream.aborted"} & types)
@@ -65,7 +68,6 @@ def diagnose_last_provider_turn(
     if "model.processor.finalized" in types and not stream_failed:
         state = "completed"
 
-    http_status = _last_payload_integer(rows, "provider.http.response.headers", "status")
     first_token_ms = _last_payload_integer(rows, "model.response.first_token", "first_token_ms")
     response_rows = [
         row

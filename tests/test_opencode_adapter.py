@@ -98,6 +98,14 @@ def test_import_preserves_unmapped_opencode_events(tmp_path: Path) -> None:
         (
             [
                 "provider.http.request.started",
+                "provider.http.response.headers:429",
+                "model.stream.error",
+            ],
+            "provider_rejected_before_stream",
+        ),
+        (
+            [
+                "provider.http.request.started",
                 "provider.http.response.headers",
                 "model.response.first_chunk",
                 "model.stream.error",
@@ -140,7 +148,13 @@ def test_diagnoses_provider_turn_stage(
     tmp_path: Path, event_types: list[str], expected: str
 ) -> None:
     source = tmp_path / "session.jsonl"
-    types = ["model.turn.created", *event_types]
+    typed_statuses = {
+        event_type.split(":", 1)[0]: int(event_type.split(":", 1)[1])
+        for event_type in event_types
+        if ":" in event_type
+    }
+    normalized_event_types = [event_type.split(":", 1)[0] for event_type in event_types]
+    types = ["model.turn.created", *normalized_event_types]
     rows = [
         {
             "schema": "tracelane-opencode-observation/v0.1",
@@ -149,7 +163,16 @@ def test_diagnoses_provider_turn_stage(
             "session_id": "ses_test",
             "payload": {
                 "request_id": "req_test",
-                **({"status": 200} if event_type == "provider.http.response.headers" else {}),
+                **(
+                    {
+                        "status": typed_statuses.get(
+                            "provider.http.response.headers",
+                            200,
+                        )
+                    }
+                    if event_type == "provider.http.response.headers"
+                    else {}
+                ),
                 **({"first_token_ms": 123} if event_type == "model.response.first_token" else {}),
             },
         }
@@ -167,5 +190,9 @@ def test_diagnoses_provider_turn_stage(
 
     assert diagnosis.state == expected
     assert diagnosis.local_termination == "wall_budget_exhausted"
-    assert diagnosis.http_status == (200 if "provider.http.response.headers" in types else None)
+    assert diagnosis.http_status == (
+        typed_statuses.get("provider.http.response.headers", 200)
+        if "provider.http.response.headers" in types
+        else None
+    )
     assert diagnosis.first_token_ms == (123 if "model.response.first_token" in types else None)
