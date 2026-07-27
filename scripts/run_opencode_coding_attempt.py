@@ -211,6 +211,7 @@ def main() -> int:
     environment["OPENCODE_TRACELANE_TURN_TIMEOUT_MS"] = str(
         args.provider_turn_timeout_seconds * 1_000
     )
+    environment["OPENCODE_TRACELANE_NO_RETRY"] = "1"
     metrics = {
         "tool_calls": 0,
         "input_tokens": 0,
@@ -281,6 +282,7 @@ def main() -> int:
             "max_tool_calls": args.max_tool_calls,
             "max_model_tokens": args.max_model_tokens,
             "provider_turn_timeout_seconds": args.provider_turn_timeout_seconds,
+            "provider_turn_retries": 0,
         },
         "usage": metrics,
     }
