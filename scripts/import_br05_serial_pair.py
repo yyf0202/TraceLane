@@ -32,6 +32,7 @@ WORK_ROOT = Path("/Users/efunyang/Documents/Codex/2026-07-26/realtime-voice-chat
 @dataclass(frozen=True)
 class AttemptSpec:
     attempt_id: str
+    repeat: int
     workflow: str
     worktree: Path
     raw_directory: Path
@@ -200,6 +201,7 @@ def _import(spec: AttemptSpec, task: CodingTask) -> dict[str, object]:
                 for name, row, execution in zip(spec.cli_files, cli_rows, executions, strict=True)
             ],
         },
+        repeat=spec.repeat,
     )
     score = _score(spec.raw_directory / "independent-grader.log")
     finalized.store.write_json("output/independent-functional-score.json", score)
@@ -212,6 +214,7 @@ def _import(spec: AttemptSpec, task: CodingTask) -> dict[str, object]:
     )
     return {
         "attempt_id": spec.attempt_id,
+        "repeat": spec.repeat,
         "workflow": spec.workflow,
         "run_id": finalized.store.run_id,
         "end_reason": end_reason,
@@ -237,6 +240,7 @@ def main() -> int:
     specs = (
         AttemptSpec(
             "br05-serial-r1-plan-build",
+            1,
             "plan-build",
             WORK_ROOT / "bericher-br05-plan-gate-1",
             RAW_ROOT / "br05-plan-gate-1",
@@ -244,21 +248,48 @@ def main() -> int:
         ),
         AttemptSpec(
             "br05-serial-r1-direct",
+            1,
             "direct-build",
             WORK_ROOT / "bericher-br05-serial-r1-direct",
             RAW_ROOT / "br05-serial-r1-direct",
+            ("cli.jsonl",),
+        ),
+        AttemptSpec(
+            "br05-serial-r2-plan-build",
+            2,
+            "plan-build",
+            WORK_ROOT / "bericher-br05-serial-r2-plan",
+            RAW_ROOT / "br05-serial-r2-plan-build-retry1",
+            ("plan-cli.jsonl", "build-cli.jsonl"),
+        ),
+        AttemptSpec(
+            "br05-serial-r2-direct",
+            2,
+            "direct-build",
+            WORK_ROOT / "bericher-br05-serial-r2-direct",
+            RAW_ROOT / "br05-serial-r2-direct",
             ("cli.jsonl",),
         ),
     )
     rows = [_import(spec, task) for spec in specs]
     result = {
         "schema_version": "coding-eval-serial-pair/v0.1",
-        "experiment": "TraceLane x OpenCode BR-05 strict serial pair 1",
+        "experiment": "TraceLane x OpenCode BR-05 strict serial pairs",
         "model": "opencode-go/glm-5.2",
         "claim_scope": (
-            "One strictly serial matched pair. Results are descriptive evidence about this "
-            "pair and do not establish a statistically significant workflow effect."
+            "Two strictly serial matched pairs. Results are descriptive evidence about these "
+            "pairs and do not establish a statistically significant workflow effect."
         ),
+        "invalid_attempts": [
+            {
+                "workflow": "plan-build",
+                "repeat": 2,
+                "phase": "plan",
+                "raw_directory": "br05-serial-r2-plan-build",
+                "reason": "missing_assistant_final_text",
+                "disposition": "excluded_infrastructure_retry",
+            }
+        ],
         "attempts": rows,
     }
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
