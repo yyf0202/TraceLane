@@ -35,6 +35,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--max-wall-seconds", type=int, required=True)
     parser.add_argument("--max-tool-calls", type=int, required=True)
     parser.add_argument("--max-model-tokens", type=int, required=True)
+    parser.add_argument("--provider-turn-timeout-seconds", type=int, default=300)
     return parser.parse_args()
 
 
@@ -72,7 +73,11 @@ def _provider_config(args: argparse.Namespace) -> str | None:
                     "npm": "@ai-sdk/openai-compatible",
                     "name": args.provider_name or args.provider_id,
                     "env": [args.api_key_env],
-                    "options": {"baseURL": args.base_url},
+                    "options": {
+                        "baseURL": args.base_url,
+                        "headerTimeout": args.provider_turn_timeout_seconds * 1_000,
+                        "chunkTimeout": args.provider_turn_timeout_seconds * 1_000,
+                    },
                     "models": {
                         args.model_id: {
                             "name": args.model_id,
@@ -147,8 +152,16 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
 
 def main() -> int:
     args = _arguments()
-    if min(args.max_wall_seconds, args.max_tool_calls, args.max_model_tokens) <= 0:
-        raise ValueError("budgets must be positive")
+    if (
+        min(
+            args.max_wall_seconds,
+            args.max_tool_calls,
+            args.max_model_tokens,
+            args.provider_turn_timeout_seconds,
+        )
+        <= 0
+    ):
+        raise ValueError("budgets and provider turn timeout must be positive")
     if not args.binary.is_file() or not args.worktree.is_dir():
         raise ValueError("binary and worktree must exist")
     message = (
@@ -161,7 +174,13 @@ def main() -> int:
     cli_path = args.raw_directory / args.cli_name
     stderr_path = args.raw_directory / f"{args.cli_name}.stderr.log"
     result_path = args.raw_directory / f"{args.cli_name}.execution.json"
-    if cli_path.exists() or stderr_path.exists() or result_path.exists():
+    termination_path = args.raw_directory / f"{args.cli_name}.termination.json"
+    if (
+        cli_path.exists()
+        or stderr_path.exists()
+        or result_path.exists()
+        or termination_path.exists()
+    ):
         raise ValueError("phase output paths must not already exist")
 
     command = [
@@ -189,6 +208,9 @@ def main() -> int:
     if provider_config is not None:
         environment["OPENCODE_CONFIG_CONTENT"] = provider_config
     environment["OPENCODE_TRACELANE_DIR"] = str(args.raw_directory.resolve())
+    environment["OPENCODE_TRACELANE_TURN_TIMEOUT_MS"] = str(
+        args.provider_turn_timeout_seconds * 1_000
+    )
     metrics = {
         "tool_calls": 0,
         "input_tokens": 0,
@@ -226,6 +248,20 @@ def main() -> int:
             elif metrics["model_tokens"] > args.max_model_tokens:
                 reason = "token_budget_exhausted"
             if reason != "completed":
+                termination_path.write_text(
+                    canonical_json(
+                        {
+                            "schema_version": "opencode-local-termination/v0.1",
+                            "source": "local_budget",
+                            "reason": reason,
+                            "signal": "SIGTERM",
+                            "wall_ms": round(elapsed * 1_000),
+                            "usage_at_termination": metrics,
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
                 _terminate(process)
                 break
         exit_code = process.poll()
@@ -244,6 +280,7 @@ def main() -> int:
             "max_wall_seconds": args.max_wall_seconds,
             "max_tool_calls": args.max_tool_calls,
             "max_model_tokens": args.max_model_tokens,
+            "provider_turn_timeout_seconds": args.provider_turn_timeout_seconds,
         },
         "usage": metrics,
     }

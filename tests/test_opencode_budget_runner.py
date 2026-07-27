@@ -76,6 +76,13 @@ def test_runner_enforces_total_provider_token_budget(tmp_path: Path) -> None:
     )
     assert execution["reason"] == "token_budget_exhausted"
     assert execution["usage"]["model_tokens"] == 103
+    assert execution["budgets"]["provider_turn_timeout_seconds"] == 300
+    termination = json.loads(
+        (tmp_path / "raw" / "cli.jsonl.termination.json").read_text(encoding="utf-8")
+    )
+    assert termination["source"] == "local_budget"
+    assert termination["reason"] == "token_budget_exhausted"
+    assert termination["signal"] == "SIGTERM"
 
 
 def test_runner_enforces_wall_budget(tmp_path: Path) -> None:
@@ -122,3 +129,8 @@ def test_runner_enforces_wall_budget(tmp_path: Path) -> None:
         (tmp_path / "raw" / "cli.jsonl.execution.json").read_text(encoding="utf-8")
     )
     assert execution["reason"] == "wall_budget_exhausted"
+    termination = json.loads(
+        (tmp_path / "raw" / "cli.jsonl.termination.json").read_text(encoding="utf-8")
+    )
+    assert termination["source"] == "local_budget"
+    assert termination["reason"] == "wall_budget_exhausted"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC
 from pathlib import Path
 
 from tracelane.artifacts import RunIdentity, RunStore
@@ -19,6 +19,83 @@ class OpenCodeSession:
     @property
     def digest(self) -> str:
         return sha256_json({"session_id": self.session_id, "observations": self.observations})
+
+
+@dataclass(frozen=True)
+class ProviderTurnDiagnosis:
+    request_id: str
+    state: str
+    http_status: int | None
+    first_token_ms: int | None
+    last_response_at: str | None
+    local_termination: str | None
+
+
+def diagnose_last_provider_turn(
+    session: OpenCodeSession,
+    *,
+    termination: Mapping[str, object] | None = None,
+) -> ProviderTurnDiagnosis:
+    start = next(
+        (
+            index
+            for index in range(len(session.observations) - 1, -1, -1)
+            if session.observations[index].get("type") == "model.turn.created"
+        ),
+        None,
+    )
+    if start is None:
+        raise ValueError("OpenCode session has no observed provider turn")
+    rows = session.observations[start:]
+    created = rows[0].get("payload")
+    request_id = created.get("request_id") if isinstance(created, Mapping) else None
+    if not isinstance(request_id, str) or not request_id:
+        raise ValueError("observed provider turn has no request ID")
+    types = {str(row.get("type")) for row in rows}
+    state = "request_not_dispatched"
+    if "provider.http.request.started" in types:
+        state = "gateway_no_response_headers"
+    if "provider.http.response.headers" in types:
+        state = "gateway_no_first_token"
+    if "model.response.first_chunk" in types:
+        state = "stream_interrupted"
+    if "model.stream.completed" in types:
+        state = "model_completed_processor_incomplete"
+    if "model.processor.finalized" in types:
+        state = "completed"
+
+    http_status = _last_payload_integer(rows, "provider.http.response.headers", "status")
+    first_token_ms = _last_payload_integer(rows, "model.response.first_token", "first_token_ms")
+    response_rows = [
+        row
+        for row in rows
+        if row.get("type")
+        in {
+            "model.response.first_chunk",
+            "model.response.first_token",
+            "model.response.progress",
+            "model.provider_turn.completed",
+            "model.stream.completed",
+            "model.stream.error",
+            "model.stream.aborted",
+        }
+    ]
+    last_response_at = str(response_rows[-1]["observed_at"]) if response_rows else None
+    local_termination = (
+        str(termination["reason"])
+        if termination is not None
+        and termination.get("source") == "local_budget"
+        and isinstance(termination.get("reason"), str)
+        else None
+    )
+    return ProviderTurnDiagnosis(
+        request_id=request_id,
+        state=state,
+        http_status=http_status,
+        first_token_ms=first_token_ms,
+        last_response_at=last_response_at,
+        local_termination=local_termination,
+    )
 
 
 def load_opencode_session(path: str | Path) -> OpenCodeSession:
@@ -47,6 +124,20 @@ def load_opencode_session(path: str | Path) -> OpenCodeSession:
     if len(session_ids) != 1:
         raise ValueError("OpenCode observation file contains multiple sessions")
     return OpenCodeSession(session_id=session_ids.pop(), observations=tuple(rows))
+
+
+def _last_payload_integer(
+    rows: tuple[Mapping[str, object], ...] | list[Mapping[str, object]],
+    event_type: str,
+    field: str,
+) -> int | None:
+    for row in reversed(rows):
+        if row.get("type") != event_type:
+            continue
+        payload = row.get("payload")
+        value = payload.get(field) if isinstance(payload, Mapping) else None
+        return value if isinstance(value, int) else None
+    return None
 
 
 def import_opencode_session(
@@ -126,4 +217,9 @@ def _trace_event_type(event_type: str) -> str:
 
 
 def _stage(event_type: str) -> str | None:
-    return {"context.selected": "context", "model.called": "model", "tool.called": "tool", "tool.observed": "tool"}.get(event_type)
+    return {
+        "context.selected": "context",
+        "model.called": "model",
+        "tool.called": "tool",
+        "tool.observed": "tool",
+    }.get(event_type)
