@@ -98,12 +98,17 @@ def grade_acceptance(repository: str | Path, task: CodingTask) -> AcceptanceGrad
 
 
 def grade_diff(snapshot: WorkspaceSnapshot, task: CodingTask) -> DiffGrade:
+    relevant_paths = tuple(
+        path
+        for path in snapshot.changed_paths
+        if not _matches(path, task.diff_policy.ignored_paths)
+    )
     protected = tuple(
-        path for path in snapshot.changed_paths if _matches(path, task.diff_policy.protected_paths)
+        path for path in relevant_paths if _matches(path, task.diff_policy.protected_paths)
     )
     out_of_scope = tuple(
         path
-        for path in snapshot.changed_paths
+        for path in relevant_paths
         if not _matches(path, task.diff_policy.editable_paths)
         and not _matches(path, task.diff_policy.protected_paths)
     )

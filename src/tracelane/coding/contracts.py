@@ -103,21 +103,28 @@ class AcceptanceSpec:
 class DiffPolicy:
     editable_paths: tuple[str, ...]
     protected_paths: tuple[str, ...]
+    ignored_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         editable = tuple(_relative_path(path, "editable_paths") for path in self.editable_paths)
         protected = tuple(_relative_path(path, "protected_paths") for path in self.protected_paths)
+        ignored = tuple(_relative_path(path, "ignored_paths") for path in self.ignored_paths)
         _unique_strings(editable, "editable_paths", required=True)
         _unique_strings(protected, "protected_paths")
+        _unique_strings(ignored, "ignored_paths")
         if any(_paths_overlap(left, right) for left in editable for right in protected):
             raise ValueError("editable_paths and protected_paths must not overlap")
+        if any(_paths_overlap(left, right) for left in ignored for right in protected):
+            raise ValueError("ignored_paths and protected_paths must not overlap")
         object.__setattr__(self, "editable_paths", editable)
         object.__setattr__(self, "protected_paths", protected)
+        object.__setattr__(self, "ignored_paths", ignored)
 
     def to_dict(self) -> dict[str, list[str]]:
         return {
             "editable_paths": list(self.editable_paths),
             "protected_paths": list(self.protected_paths),
+            "ignored_paths": list(self.ignored_paths),
         }
 
 

@@ -52,6 +52,13 @@ def test_coding_task_rejects_overlapping_writable_and_protected_paths() -> None:
         DiffPolicy(editable_paths=("src/**",), protected_paths=("src/private/**",))
 
 
+def test_diff_policy_records_ignored_collector_paths() -> None:
+    policy = DiffPolicy(
+        editable_paths=("src/**",), protected_paths=("data/**",), ignored_paths=("traces/**",)
+    )
+    assert policy.to_dict()["ignored_paths"] == ["traces/**"]
+
+
 @pytest.mark.parametrize("path", ["../outside.py", "/absolute.py", "C:/outside.py"])
 def test_coding_task_rejects_unsafe_paths(path: str) -> None:
     with pytest.raises(ValueError, match="relative"):

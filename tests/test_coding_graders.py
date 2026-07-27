@@ -80,6 +80,28 @@ def test_diff_grader_rejects_protected_path_change(tmp_path: Path) -> None:
     assert grade.protected_changes == ("data/leak.txt",)
 
 
+def test_diff_grader_ignores_declared_collector_paths(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (root / "traces").mkdir()
+    (root / "traces" / "session.jsonl").write_text("trace\n", encoding="utf-8")
+    base = git(root, "rev-parse", "HEAD")
+    fixture = task(root)
+    ignored = CodingTask(
+        task_id=fixture.task_id,
+        version=fixture.version,
+        baseline=fixture.baseline,
+        objective=fixture.objective,
+        acceptance=fixture.acceptance,
+        diff_policy=DiffPolicy(("calculator.py",), ("data/**",), ("traces/**",)),
+        interaction=fixture.interaction,
+        allowed_commands=fixture.allowed_commands,
+        max_wall_seconds=fixture.max_wall_seconds,
+        max_tool_calls=fixture.max_tool_calls,
+        max_model_tokens=fixture.max_model_tokens,
+    )
+    assert grade_diff(capture_workspace(root, base), ignored).status == "pass"
+
+
 def test_recovery_grader_requires_change_before_later_success() -> None:
     grade = grade_recovery(
         (
