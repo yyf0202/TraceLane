@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Import the first strictly serial BR-05 direct-versus-plan pair."""
+"""Import the strictly serial BR-05 direct-versus-plan repeats."""
 
 from __future__ import annotations
 
@@ -34,6 +34,9 @@ class AttemptSpec:
     attempt_id: str
     repeat: int
     workflow: str
+    provider: str
+    model: str
+    observer_revision: str
     worktree: Path
     raw_directory: Path
     cli_files: tuple[str, ...]
@@ -86,6 +89,17 @@ def _score(path: Path) -> dict[str, object]:
     raise ValueError(f"{path} has no functional score")
 
 
+def _optional_prefixed_score(path: Path, prefix: str) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(prefix):
+            value = json.loads(line.removeprefix(prefix))
+            if isinstance(value, dict):
+                return value
+    return None
+
+
 def _sessions(
     spec: AttemptSpec, cli_rows: tuple[dict[str, object], ...]
 ) -> tuple[AttemptSession, ...]:
@@ -96,6 +110,14 @@ def _sessions(
             AttemptSession(
                 SessionRef(session_id, session_id, None, "build"),
                 load_opencode_session(spec.raw_directory / f"{session_id}.jsonl"),
+            ),
+        )
+    if len(session_ids) == 1:
+        plan_session_id = session_ids[0]
+        return (
+            AttemptSession(
+                SessionRef(plan_session_id, plan_session_id, None, "plan"),
+                load_opencode_session(spec.raw_directory / f"{plan_session_id}.jsonl"),
             ),
         )
     plan_session_id, build_session_id = session_ids
@@ -141,18 +163,36 @@ def _import(spec: AttemptSpec, task: CodingTask) -> dict[str, object]:
     }
     wall_ms = sum(int(execution["wall_ms"]) for execution in executions)
     amount_usd = round(sum(float(row["amount_usd"]) for row in cli_rows), 8)
+    build_started = spec.workflow == "plan-build" and len(cli_rows) == 2
     plan_artifact = (
         load_plan_artifact(
             json.loads((spec.raw_directory / "handoff/plan.json").read_text(encoding="utf-8"))
         )
-        if spec.workflow == "plan-build"
+        if build_started
         else None
     )
     execution_reason = str(executions[-1]["reason"])
-    end_reason = (
-        "budget_exhausted" if execution_reason.endswith("_budget_exhausted") else execution_reason
+    workflow_end_path = spec.raw_directory / "workflow-end.json"
+    workflow_end = (
+        json.loads(workflow_end_path.read_text(encoding="utf-8"))
+        if workflow_end_path.exists()
+        else None
     )
+    workflow_reason = (
+        str(workflow_end["reason"])
+        if isinstance(workflow_end, dict) and "reason" in workflow_end
+        else execution_reason
+    )
+    if workflow_reason == "plan_gate_failed":
+        end_reason = "blocked"
+    elif workflow_reason.endswith("_budget_exhausted"):
+        end_reason = "budget_exhausted"
+    else:
+        end_reason = execution_reason
     final_answer = cli_rows[-1]["final_answer"]
+    plan_score = _optional_prefixed_score(
+        spec.raw_directory / "plan-gate.log", "TRACELANE_PLAN_SCORE="
+    )
     finalized = finalize_coding_attempt(
         task,
         attempt_id=spec.attempt_id,
@@ -171,15 +211,28 @@ def _import(spec: AttemptSpec, task: CodingTask) -> dict[str, object]:
         artifact_root=ARTIFACT_ROOT,
         harness_config={
             "workflow": spec.workflow,
-            "provider": "opencode-go",
-            "model": "glm-5.2",
-            "observer_revision": "7cd3d44",
+            "provider": spec.provider,
+            "model": spec.model,
+            "observer_revision": spec.observer_revision,
             "execution_mode": "strictly-serial-pair",
             "budget_enforcement": "runtime-v0.1",
             "shared_task_budget": True,
+            "phase_reached": (
+                "build" if spec.workflow == "direct-build" or build_started else "plan"
+            ),
+            "build_started": spec.workflow == "direct-build" or build_started,
+            "workflow_end": workflow_reason,
             **(
-                {"phase_link": "manual-cli-split", "plan_gate": "passed-100-of-100"}
-                if spec.workflow == "plan-build"
+                {
+                    "phase_link": "manual-cli-split",
+                    "plan_gate": f"passed-{plan_score['earned']}-of-{plan_score['possible']}",
+                }
+                if build_started and plan_score is not None
+                else {}
+            ),
+            **(
+                {"plan_gate": f"failed-{plan_score['earned']}-of-{plan_score['possible']}"}
+                if spec.workflow == "plan-build" and not build_started and plan_score is not None
                 else {}
             ),
         },
@@ -205,6 +258,15 @@ def _import(spec: AttemptSpec, task: CodingTask) -> dict[str, object]:
     )
     score = _score(spec.raw_directory / "independent-grader.log")
     finalized.store.write_json("output/independent-functional-score.json", score)
+    if plan_artifact is None and (spec.raw_directory / "handoff/plan.json").exists():
+        finalized.store.write_json(
+            "input/plan.json",
+            json.loads((spec.raw_directory / "handoff/plan.json").read_text(encoding="utf-8")),
+        )
+    if plan_score is not None:
+        finalized.store.write_json("output/plan-gate-score.json", plan_score)
+    if workflow_end is not None:
+        finalized.store.write_json("output/workflow-end.json", workflow_end)
     finalized.store.write_json(
         "output/executions.json",
         {"phases": list(executions), "combined_wall_ms": wall_ms},
@@ -216,9 +278,14 @@ def _import(spec: AttemptSpec, task: CodingTask) -> dict[str, object]:
         "attempt_id": spec.attempt_id,
         "repeat": spec.repeat,
         "workflow": spec.workflow,
+        "provider": spec.provider,
+        "model": spec.model,
         "run_id": finalized.store.run_id,
         "end_reason": end_reason,
         "execution_reason": execution_reason,
+        "workflow_end": workflow_reason,
+        "plan_score": plan_score["earned"] if plan_score is not None else None,
+        "build_started": spec.workflow == "direct-build" or build_started,
         "functional_score": score["earned"],
         "functional_possible": score["possible"],
         "overall": finalized.grades.overall,
@@ -242,6 +309,9 @@ def main() -> int:
             "br05-serial-r1-plan-build",
             1,
             "plan-build",
+            "opencode-go",
+            "glm-5.2",
+            "7cd3d44",
             WORK_ROOT / "bericher-br05-plan-gate-1",
             RAW_ROOT / "br05-plan-gate-1",
             ("plan-cli.jsonl", "build-cli.jsonl"),
@@ -250,6 +320,9 @@ def main() -> int:
             "br05-serial-r1-direct",
             1,
             "direct-build",
+            "opencode-go",
+            "glm-5.2",
+            "7cd3d44",
             WORK_ROOT / "bericher-br05-serial-r1-direct",
             RAW_ROOT / "br05-serial-r1-direct",
             ("cli.jsonl",),
@@ -258,6 +331,9 @@ def main() -> int:
             "br05-serial-r2-plan-build",
             2,
             "plan-build",
+            "opencode-go",
+            "glm-5.2",
+            "7cd3d44",
             WORK_ROOT / "bericher-br05-serial-r2-plan",
             RAW_ROOT / "br05-serial-r2-plan-build-retry1",
             ("plan-cli.jsonl", "build-cli.jsonl"),
@@ -266,8 +342,77 @@ def main() -> int:
             "br05-serial-r2-direct",
             2,
             "direct-build",
+            "opencode-go",
+            "glm-5.2",
+            "7cd3d44",
             WORK_ROOT / "bericher-br05-serial-r2-direct",
             RAW_ROOT / "br05-serial-r2-direct",
+            ("cli.jsonl",),
+        ),
+        AttemptSpec(
+            "br05-serial-r3-plan-build",
+            3,
+            "plan-build",
+            "ark",
+            "glm-5.2",
+            "27a2c94",
+            WORK_ROOT / "bericher-br05-ark-r3-plan",
+            RAW_ROOT / "br05-ark-r3-plan-build",
+            ("plan-cli.jsonl",),
+        ),
+        AttemptSpec(
+            "br05-serial-r3-direct",
+            3,
+            "direct-build",
+            "ark",
+            "glm-5.2",
+            "27a2c94",
+            WORK_ROOT / "bericher-br05-ark-r3-direct",
+            RAW_ROOT / "br05-ark-r3-direct",
+            ("cli.jsonl",),
+        ),
+        AttemptSpec(
+            "br05-serial-r4-plan-build",
+            4,
+            "plan-build",
+            "ark",
+            "glm-5.2",
+            "27a2c94",
+            WORK_ROOT / "bericher-br05-ark-r4-plan",
+            RAW_ROOT / "br05-ark-r4-plan-build",
+            ("plan-cli.jsonl",),
+        ),
+        AttemptSpec(
+            "br05-serial-r4-direct",
+            4,
+            "direct-build",
+            "ark",
+            "glm-5.2",
+            "27a2c94",
+            WORK_ROOT / "bericher-br05-ark-r4-direct",
+            RAW_ROOT / "br05-ark-r4-direct",
+            ("cli.jsonl",),
+        ),
+        AttemptSpec(
+            "br05-serial-r5-plan-build",
+            5,
+            "plan-build",
+            "ark",
+            "glm-5.2",
+            "27a2c94",
+            WORK_ROOT / "bericher-br05-ark-r5-plan",
+            RAW_ROOT / "br05-ark-r5-plan-build",
+            ("plan-cli.jsonl", "build-cli.jsonl"),
+        ),
+        AttemptSpec(
+            "br05-serial-r5-direct",
+            5,
+            "direct-build",
+            "ark",
+            "glm-5.2",
+            "27a2c94",
+            WORK_ROOT / "bericher-br05-ark-r5-direct",
+            RAW_ROOT / "br05-ark-r5-direct",
             ("cli.jsonl",),
         ),
     )
@@ -275,10 +420,14 @@ def main() -> int:
     result = {
         "schema_version": "coding-eval-serial-pair/v0.1",
         "experiment": "TraceLane x OpenCode BR-05 strict serial pairs",
-        "model": "opencode-go/glm-5.2",
+        "provider_model_boundaries": [
+            {"repeats": [1, 2], "provider": "opencode-go", "model": "glm-5.2"},
+            {"repeats": [3, 4, 5], "provider": "ark", "model": "glm-5.2"},
+        ],
         "claim_scope": (
-            "Two strictly serial matched pairs. Results are descriptive evidence about these "
-            "pairs and do not establish a statistically significant workflow effect."
+            "Five strictly serial matched pairs across a provider boundary. Results are "
+            "descriptive evidence about these attempts and do not establish a statistically "
+            "significant workflow effect."
         ),
         "invalid_attempts": [
             {
