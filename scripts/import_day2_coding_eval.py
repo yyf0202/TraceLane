@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import run_day2_coding_eval as experiment
@@ -73,6 +74,39 @@ def _prefixed_score(path: Path, prefix: str) -> dict[str, object] | None:
             value = json.loads(line.removeprefix(prefix))
             return value if isinstance(value, dict) else None
     return None
+
+
+def _score_output(output: str, prefix: str) -> dict[str, object] | None:
+    for line in output.splitlines():
+        if line.startswith(prefix):
+            value = json.loads(line.removeprefix(prefix))
+            return value if isinstance(value, dict) else None
+    return None
+
+
+def _adjudicated_score(
+    spec: experiment.AttemptSpec,
+    worktree: Path,
+) -> dict[str, object] | None:
+    if spec.task.short_id != "BR-07":
+        return None
+    grader = ROOT / "tests/fixtures/coding_tasks/br07_v2_hidden_acceptance.py"
+    result = subprocess.run(
+        [str(experiment.GRADER_PYTHON), str(grader), "."],
+        cwd=worktree,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    score = _score_output(result.stdout, "TRACELANE_SCORE=")
+    if score is None:
+        raise ValueError(f"{spec.run_slug} has no BR-07 v2 adjudicated score")
+    return {
+        **score,
+        "grader": "br07_v2_hidden_acceptance.py",
+        "grader_version": 2,
+        "runner_exit_code": result.returncode,
+    }
 
 
 def _termination(raw: Path, cli_name: str) -> dict[str, object] | None:
@@ -178,6 +212,7 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
     score = _prefixed_score(raw / "independent-grader.log", "TRACELANE_SCORE=")
     if score is None:
         raise ValueError(f"{spec.run_slug} has no independent functional score")
+    adjudicated_score = _adjudicated_score(spec, worktree)
     end_reason = _end_reason(executions, workflow_end)
     final_answer = cli_rows[-1]["final_answer"]
     finalized = finalize_coding_attempt(
@@ -224,11 +259,20 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
         repeat=spec.repeat,
     )
     finalized.store.write_json("output/independent-functional-score.json", score)
+    if adjudicated_score is not None:
+        finalized.store.write_json(
+            "output/adjudicated-functional-score.json",
+            adjudicated_score,
+        )
     finalized.store.write_json("output/provider-turn-diagnoses.json", {"phases": diagnoses})
     finalized.store.write_json("output/workflow-end.json", workflow_end)
     if plan_score is not None:
         finalized.store.write_json("output/plan-gate-score.json", plan_score)
     trace_bytes = sum((raw / f"{row['session_id']}.jsonl").stat().st_size for row in cli_rows)
+    provider_rejected = any(
+        phase["state"] == "provider_rejected_before_stream" for phase in diagnoses
+    )
+    analysis_score = adjudicated_score or score
     return {
         "attempt_id": spec.run_slug,
         "task": spec.task.short_id,
@@ -243,6 +287,12 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
         "plan_score": plan_score["earned"] if plan_score else None,
         "functional_score": score["earned"],
         "functional_possible": score["possible"],
+        "adjudicated_functional_score": (
+            adjudicated_score["earned"] if adjudicated_score else None
+        ),
+        "analysis_functional_score": analysis_score["earned"],
+        "analysis_functional_possible": analysis_score["possible"],
+        "capability_analysis_eligible": not provider_rejected,
         "overall": finalized.grades.overall,
         "acceptance": finalized.grades.acceptance.status,
         "diff": finalized.grades.diff.status,
