@@ -11,6 +11,7 @@ from pathlib import Path
 from tracelane.contracts import canonical_json, sha256_json
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_WINDOWS_DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 def _validate_digest(value: str, label: str) -> str:
@@ -143,7 +144,8 @@ class RunStore:
         if not isinstance(name, (str, Path)):
             raise ValueError("artifact path must be relative")
         relative = Path(name)
-        if relative.is_absolute() or relative.drive:
+        raw_name = str(name)
+        if relative.is_absolute() or relative.drive or _WINDOWS_DRIVE_PATH.match(raw_name):
             raise ValueError("artifact path must be relative")
         if not relative.parts or any(part == ".." for part in relative.parts):
             raise ValueError("artifact path escapes the run directory")
@@ -162,13 +164,17 @@ class RunStore:
         return candidate
 
     def write_json(self, name: str | Path, value: object) -> Path:
+        return self.write_bytes(name, (canonical_json(value) + "\n").encode("utf-8"))
+
+    def write_bytes(self, name: str | Path, value: bytes) -> Path:
+        if not isinstance(value, bytes):
+            raise ValueError("artifact bytes must be bytes")
         target = self.path_for(name)
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-        payload = (canonical_json(value) + "\n").encode("utf-8")
         try:
             with temporary.open("xb") as handle:
-                handle.write(payload)
+                handle.write(value)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, target)
