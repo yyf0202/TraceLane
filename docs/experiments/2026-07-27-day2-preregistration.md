@@ -25,3 +25,16 @@ token, stream interruption, and processor finalization failure.
 
 The final comparison is descriptive. Ark and earlier OpenCode Go results are
 not pooled, and no statistical-significance claim will be made.
+
+## Frozen correction before the valid matrix
+
+The first four BR-06/GLM attempts exposed a grader false negative: an
+implementation passed holding state as `holdings=` plus an ADV10 map, while
+the v1 grader required the literal source spelling `current_holdings=`.
+Those four attempts remain preserved as excluded pilots. A just-started
+DeepSeek plan was stopped and is also excluded.
+
+BR-06 v2 replaces that spelling assertion with a behavioral engine-to-strategy
+handoff test. It scores the historical fix and the equivalent implementation
+100/100, while the baseline remains 0/100. The valid 36-attempt matrix starts
+again with `day2-br-06-v2-*` run IDs; BR-07 and BR-08 are unchanged.

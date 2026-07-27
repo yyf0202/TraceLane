@@ -40,6 +40,7 @@ class TaskSpec:
     short_id: str
     manifest: Path
     grader: Path
+    run_version: str = ""
 
 
 @dataclass(frozen=True)
@@ -59,14 +60,19 @@ class AttemptSpec:
 
     @property
     def run_slug(self) -> str:
-        return f"day2-{self.task.short_id.lower()}-{self.model_slug}-r{self.repeat}-{self.workflow}"
+        version = f"-{self.task.run_version}" if self.task.run_version else ""
+        return (
+            f"day2-{self.task.short_id.lower()}{version}-"
+            f"{self.model_slug}-r{self.repeat}-{self.workflow}"
+        )
 
 
 TASKS = (
     TaskSpec(
         "BR-06",
-        ROOT / "fixtures/coding/bericher-v0.5/tasks/BR-06-adv10-holding-exemption.json",
-        ROOT / "tests/fixtures/coding_tasks/br06_hidden_acceptance.py",
+        ROOT / "fixtures/coding/bericher-v0.6/tasks/BR-06-adv10-holding-exemption-v2.json",
+        ROOT / "tests/fixtures/coding_tasks/br06_v2_hidden_acceptance.py",
+        "v2",
     ),
     TaskSpec(
         "BR-07",

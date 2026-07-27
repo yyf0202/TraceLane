@@ -1,0 +1,61 @@
+{
+  "schema_version": "coding-eval-preregistration/v0.1",
+  "experiment_id": "bericher-day2-v2-ark-three-models",
+  "suite": "fixtures/coding/bericher-v0.6/suite.json",
+  "tasks": [
+    "BR-06-v2",
+    "BR-07",
+    "BR-08"
+  ],
+  "provider": {
+    "id": "ark",
+    "protocol": "openai-compatible",
+    "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3"
+  },
+  "models": [
+    "glm-5.2",
+    "deepseek-v4-pro",
+    "kimi-k2.7-code"
+  ],
+  "workflows": [
+    "direct-build",
+    "plan-build"
+  ],
+  "repeats": 2,
+  "execution": {
+    "serial": true,
+    "pair_adjacent": true,
+    "pair_order": "alternates by task, model, and repeat",
+    "automatic_attempt_retries": 0,
+    "provider_turn_watchdog_seconds": 300,
+    "observer_revision": "06d9803be9"
+  },
+  "shared_attempt_budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  },
+  "plan_phase_cap": {
+    "max_wall_seconds": 900,
+    "max_tool_calls": 80,
+    "max_model_tokens": 1000000,
+    "gate_required_score": 100
+  },
+  "excluded_pilot": {
+    "runs": [
+      "day2-br-06-glm52-r1-direct-build",
+      "day2-br-06-glm52-r1-plan-build",
+      "day2-br-06-glm52-r2-plan-build",
+      "day2-br-06-glm52-r2-direct-build"
+    ],
+    "reason": "BR-06 v1 grader required one keyword spelling instead of testing the engine-to-strategy holding-state behavior."
+  },
+  "aborted_diagnostic": {
+    "run": "day2-br-06-dsv4pro-r1-plan-build",
+    "reason": "Manually stopped immediately after the v1 grader defect was discovered; excluded."
+  },
+  "analysis": {
+    "provider_stratification": "Ark results are reported separately from OpenCode Go.",
+    "claim_scope": "Descriptive paired evidence only; no statistical-significance claim."
+  }
+}
