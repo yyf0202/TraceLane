@@ -12,7 +12,12 @@ from tracelane.coding.contracts import (
     RepositoryBaseline,
 )
 from tracelane.coding.workspace import capture_workspace
-from tracelane.graders.coding import grade_acceptance, grade_diff, grade_recovery
+from tracelane.graders.coding import (
+    grade_acceptance,
+    grade_diff,
+    grade_functional,
+    grade_recovery,
+)
 
 
 def git(repository: Path, *args: str) -> str:
@@ -48,14 +53,20 @@ def repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def evidence(status: str, before: str, after: str, classification: str = "test") -> CommandEvidence:
+def evidence(
+    status: str,
+    before: str,
+    after: str,
+    classification: str = "test",
+    stdout: str = "",
+) -> CommandEvidence:
     return CommandEvidence(
         command="python3 check.py",
         classification=classification,
         status=status,
         exit_code=0 if status == "passed" else 1,
         duration_ms=1,
-        stdout_preview="",
+        stdout_preview=stdout,
         stderr_preview="",
         stdout_sha256="a" * 64,
         stderr_sha256="b" * 64,
@@ -118,3 +129,32 @@ def test_recovery_grader_requires_change_before_later_success() -> None:
         )
     )
     assert recovered.status == "recovered"
+
+
+def test_functional_grader_parses_structured_acceptance_score() -> None:
+    score = (
+        'TRACELANE_SCORE={"earned": 70, "possible": 100, "criteria": ['
+        '{"name": "engine", "points": 70, "earned": 70}, '
+        '{"name": "labels", "points": 30, "earned": 0, "error": "wrong window"}]}'
+    )
+    grade = grade_functional((evidence("failed", "one", "one", stdout=score),))
+
+    assert grade.status == "partial"
+    assert grade.earned == 70
+    assert grade.criteria[1].error == "wrong window"
+
+
+def test_functional_grader_rejects_inconsistent_score() -> None:
+    score = (
+        'TRACELANE_SCORE={"earned": 100, "possible": 100, "criteria": ['
+        '{"name": "engine", "points": 60, "earned": 60}]}'
+    )
+    assert grade_functional((evidence("passed", "one", "one", stdout=score),)).status == (
+        "invalid_score"
+    )
+
+
+def test_functional_grader_is_optional_for_legacy_tasks() -> None:
+    grade = grade_functional((evidence("passed", "one", "one"),))
+    assert grade.status == "not_scored"
+    assert grade.possible == 0

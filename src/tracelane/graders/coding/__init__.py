@@ -5,11 +5,14 @@ from tracelane.graders.coding.core import (
     CodingGradeReport,
     CostGrade,
     DiffGrade,
+    FunctionalCriterionGrade,
+    FunctionalGrade,
     RecoveryGrade,
     grade_acceptance,
     grade_attempt,
     grade_cost,
     grade_diff,
+    grade_functional,
     grade_recovery,
 )
 
@@ -18,10 +21,13 @@ __all__ = [
     "CodingGradeReport",
     "CostGrade",
     "DiffGrade",
+    "FunctionalCriterionGrade",
+    "FunctionalGrade",
     "RecoveryGrade",
     "grade_acceptance",
     "grade_attempt",
     "grade_cost",
     "grade_diff",
+    "grade_functional",
     "grade_recovery",
 ]

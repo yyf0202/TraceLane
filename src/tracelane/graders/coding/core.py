@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -72,11 +73,44 @@ class CostGrade:
 
 
 @dataclass(frozen=True)
+class FunctionalCriterionGrade:
+    name: str
+    points: int
+    earned: int
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "points": self.points,
+            "earned": self.earned,
+            "error": self.error,
+        }
+
+
+@dataclass(frozen=True)
+class FunctionalGrade:
+    status: str
+    earned: int
+    possible: int
+    criteria: tuple[FunctionalCriterionGrade, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "earned": self.earned,
+            "possible": self.possible,
+            "criteria": [item.to_dict() for item in self.criteria],
+        }
+
+
+@dataclass(frozen=True)
 class CodingGradeReport:
     acceptance: AcceptanceGrade
     diff: DiffGrade
     recovery: RecoveryGrade
     cost: CostGrade
+    functional: FunctionalGrade
     overall: str
 
     def to_dict(self) -> dict[str, object]:
@@ -85,6 +119,7 @@ class CodingGradeReport:
             "diff": self.diff.to_dict(),
             "recovery": self.recovery.to_dict(),
             "cost": self.cost.to_dict(),
+            "functional": self.functional.to_dict(),
             "overall": self.overall,
         }
 
@@ -167,6 +202,79 @@ def grade_cost(
     )
 
 
+def grade_functional(commands: Sequence[CommandEvidence]) -> FunctionalGrade:
+    """Parse the last validated ``TRACELANE_SCORE`` emitted by an acceptance command."""
+    marker = "TRACELANE_SCORE="
+    payload: object | None = None
+    for command in commands:
+        for line in command.stdout_preview.splitlines():
+            if line.startswith(marker):
+                try:
+                    payload = json.loads(line.removeprefix(marker))
+                except json.JSONDecodeError:
+                    continue
+    if not isinstance(payload, dict):
+        return FunctionalGrade(status="not_scored", earned=0, possible=0, criteria=())
+
+    earned = payload.get("earned")
+    possible = payload.get("possible")
+    raw_criteria = payload.get("criteria")
+    if (
+        isinstance(earned, bool)
+        or not isinstance(earned, int)
+        or isinstance(possible, bool)
+        or not isinstance(possible, int)
+        or possible <= 0
+        or earned < 0
+        or earned > possible
+        or not isinstance(raw_criteria, list)
+    ):
+        return FunctionalGrade(status="invalid_score", earned=0, possible=0, criteria=())
+
+    criteria: list[FunctionalCriterionGrade] = []
+    for raw in raw_criteria:
+        if not isinstance(raw, dict):
+            return FunctionalGrade(status="invalid_score", earned=0, possible=0, criteria=())
+        name = raw.get("name")
+        points = raw.get("points")
+        criterion_earned = raw.get("earned")
+        error = raw.get("error")
+        if (
+            not isinstance(name, str)
+            or not name.strip()
+            or isinstance(points, bool)
+            or not isinstance(points, int)
+            or points <= 0
+            or isinstance(criterion_earned, bool)
+            or not isinstance(criterion_earned, int)
+            or criterion_earned < 0
+            or criterion_earned > points
+            or (error is not None and not isinstance(error, str))
+        ):
+            return FunctionalGrade(status="invalid_score", earned=0, possible=0, criteria=())
+        criteria.append(
+            FunctionalCriterionGrade(
+                name=name.strip(),
+                points=points,
+                earned=criterion_earned,
+                error=error,
+            )
+        )
+
+    if (
+        len({criterion.name for criterion in criteria}) != len(criteria)
+        or sum(criterion.points for criterion in criteria) != possible
+        or sum(criterion.earned for criterion in criteria) != earned
+    ):
+        return FunctionalGrade(status="invalid_score", earned=0, possible=0, criteria=())
+    return FunctionalGrade(
+        status="pass" if earned == possible else "partial",
+        earned=earned,
+        possible=possible,
+        criteria=tuple(criteria),
+    )
+
+
 def grade_attempt(
     repository: str | Path,
     task: CodingTask,
@@ -181,9 +289,10 @@ def grade_attempt(
     all_commands = (*command_history, *acceptance.commands)
     recovery = grade_recovery(all_commands)
     cost = grade_cost(all_commands, input_tokens=input_tokens, output_tokens=output_tokens)
+    functional = grade_functional(acceptance.commands)
     if diff.status == "invalid":
         overall = "invalid"
-    elif acceptance.status != "pass":
+    elif acceptance.status != "pass" or functional.status == "invalid_score":
         overall = "fail"
     else:
         overall = "pass"
@@ -192,5 +301,6 @@ def grade_attempt(
         diff=diff,
         recovery=recovery,
         cost=cost,
+        functional=functional,
         overall=overall,
     )

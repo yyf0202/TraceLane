@@ -11,6 +11,12 @@ from tracelane.coding.contracts import (
     load_coding_task,
 )
 from tracelane.coding.orchestrator import FinalizedCodingAttempt, finalize_coding_attempt
+from tracelane.coding.plan_artifact import (
+    PlanArtifact,
+    build_handoff_prompt,
+    extract_plan_artifact,
+    load_plan_artifact,
+)
 
 __all__ = [
     "AcceptanceSpec",
@@ -23,4 +29,8 @@ __all__ = [
     "load_coding_task",
     "FinalizedCodingAttempt",
     "finalize_coding_attempt",
+    "PlanArtifact",
+    "build_handoff_prompt",
+    "extract_plan_artifact",
+    "load_plan_artifact",
 ]

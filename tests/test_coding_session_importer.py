@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 from tests.test_coding_contracts import task
 from tracelane.adapters.opencode import OpenCodeSession
 from tracelane.coding.contracts import AttemptEnd, SessionRef
+from tracelane.coding.plan_artifact import PlanArtifact
 from tracelane.coding.session_importer import AttemptSession, import_coding_attempt
 from tracelane.coding.workspace import WorkspaceSnapshot
 
@@ -120,3 +122,66 @@ def test_task_level_import_redacts_local_paths_in_frozen_session(tmp_path: Path)
     frozen = (store.run_dir / "input" / "sessions" / "ses_build.json").read_text(encoding="utf-8")
     assert "/Users/private" not in frozen
     assert "[LOCAL_PATH]" in frozen
+
+
+def test_plan_artifact_is_bound_to_root_and_frozen_with_attempt(tmp_path: Path) -> None:
+    root = session("ses_plan", "2026-07-27T00:00:00Z", "chat.message")
+    child = session("ses_build", "2026-07-27T00:00:01Z", "chat.message")
+    content = "Inspect the failure and implement the smallest safe fix."
+    plan = PlanArtifact(
+        task_sha256=task().task_sha256,
+        plan_session_id="ses_plan",
+        content=content,
+        content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+        source_cli_sha256="a" * 64,
+    )
+
+    store = import_coding_attempt(
+        task(),
+        attempt_id="attempt-plan-build",
+        sessions=(
+            AttemptSession(SessionRef("ses_plan", "ses_plan", None, "plan"), root),
+            AttemptSession(
+                SessionRef("ses_build", "ses_plan", "ses_plan", "build"),
+                child,
+            ),
+        ),
+        initial_workspace=snapshot(),
+        final_workspace=snapshot(),
+        end=AttemptEnd(reason="completed", final_answer="Done."),
+        artifact_root=tmp_path,
+        harness_config={"workflow": "plan-build"},
+        plan_artifact=plan,
+    )
+
+    frozen = json.loads((store.run_dir / "input" / "plan.json").read_text())
+    assert frozen["content_sha256"] == plan.content_sha256
+    assert frozen["plan_session_id"] == "ses_plan"
+
+
+def test_plan_artifact_requires_a_build_child(tmp_path: Path) -> None:
+    root = session("ses_plan", "2026-07-27T00:00:00Z", "chat.message")
+    content = "Plan."
+    plan = PlanArtifact(
+        task_sha256=task().task_sha256,
+        plan_session_id="ses_plan",
+        content=content,
+        content_sha256=hashlib.sha256(content.encode()).hexdigest(),
+        source_cli_sha256="a" * 64,
+    )
+    try:
+        import_coding_attempt(
+            task(),
+            attempt_id="attempt-plan-only",
+            sessions=(AttemptSession(SessionRef("ses_plan", "ses_plan", None, "plan"), root),),
+            initial_workspace=snapshot(),
+            final_workspace=snapshot(),
+            end=AttemptEnd(reason="completed", final_answer="Done."),
+            artifact_root=tmp_path,
+            harness_config={"workflow": "plan-build"},
+            plan_artifact=plan,
+        )
+    except ValueError as exc:
+        assert "build child" in str(exc)
+    else:
+        raise AssertionError("plan-only attempt must not accept a plan artifact")

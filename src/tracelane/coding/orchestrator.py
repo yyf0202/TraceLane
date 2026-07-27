@@ -7,6 +7,7 @@ from pathlib import Path
 from tracelane.artifacts import RunStore
 from tracelane.coding.commands import CommandEvidence
 from tracelane.coding.contracts import AttemptEnd, CodingTask
+from tracelane.coding.plan_artifact import PlanArtifact
 from tracelane.coding.session_importer import AttemptSession, import_coding_attempt
 from tracelane.coding.workspace import WorkspaceSnapshot
 from tracelane.graders.coding import CodingGradeReport, grade_attempt
@@ -29,6 +30,7 @@ def finalize_coding_attempt(
     repository: str | Path,
     artifact_root: str | Path,
     harness_config: Mapping[str, object],
+    plan_artifact: PlanArtifact | None = None,
     command_history: Sequence[CommandEvidence] = (),
     input_tokens: int = 0,
     output_tokens: int = 0,
@@ -45,6 +47,7 @@ def finalize_coding_attempt(
         end=end,
         artifact_root=artifact_root,
         harness_config=harness_config,
+        plan_artifact=plan_artifact,
         repeat=repeat,
     )
     grades = grade_attempt(

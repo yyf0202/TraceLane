@@ -9,6 +9,7 @@ from pathlib import Path
 from tracelane.adapters.opencode import OpenCodeSession
 from tracelane.artifacts import RunIdentity, RunStore
 from tracelane.coding.contracts import AttemptEnd, CodingTask, SessionRef
+from tracelane.coding.plan_artifact import PlanArtifact
 from tracelane.coding.workspace import WorkspaceSnapshot
 from tracelane.contracts import canonical_json, parse_utc, sha256_json
 from tracelane.security import classify_and_redact
@@ -107,6 +108,7 @@ def import_coding_attempt(
     end: AttemptEnd,
     artifact_root: str | Path,
     harness_config: Mapping[str, object],
+    plan_artifact: PlanArtifact | None = None,
     repeat: int = 1,
 ) -> RunStore:
     """Freeze a full OpenCode session tree as one coding-task attempt."""
@@ -117,6 +119,16 @@ def import_coding_attempt(
     if final_workspace.baseline_commit != task.baseline.commit_sha:
         raise ValueError("final workspace does not match the task baseline")
     root_session_id = _validate_sessions(sessions)
+    if plan_artifact is not None:
+        if plan_artifact.task_sha256 != task.task_sha256:
+            raise ValueError("plan artifact does not match the coding task")
+        if plan_artifact.plan_session_id != root_session_id:
+            raise ValueError("plan artifact session must be the attempt root")
+        if not any(
+            item.ref.parent_session_id == root_session_id and item.ref.agent_kind == "build"
+            for item in sessions
+        ):
+            raise ValueError("plan artifact requires a linked build child session")
     config = json.loads(canonical_json(harness_config))
     session_digest = sha256_json(
         [
@@ -134,6 +146,9 @@ def import_coding_attempt(
         config_sha256=sha256_json(
             {
                 "harness_config": config,
+                "plan_artifact": (
+                    plan_artifact.to_dict() if plan_artifact is not None else None
+                ),
                 "initial_workspace": initial_workspace.to_dict(),
                 "final_workspace": final_workspace.to_dict(),
             }
@@ -152,6 +167,8 @@ def import_coding_attempt(
             "end": end.to_dict(),
         },
     )
+    if plan_artifact is not None:
+        store.write_json("input/plan.json", plan_artifact.to_dict())
     for item in sessions:
         sanitized_observations = classify_and_redact(item.session.observations).value
         store.write_json(

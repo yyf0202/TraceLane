@@ -1,4 +1,4 @@
-# TraceLane × OpenCode Day 1 coding-eval
+# TraceLane × OpenCode Day 1 integration pilot
 
 Date: 2026-07-27
 
@@ -8,13 +8,15 @@ Observer revision: OpenCode fork `7cd3d44`
 
 ## Scope
 
-This is a four-attempt vertical-slice check of the coding evaluation chain. It
+This is a four-attempt integration check of the coding evaluation chain. It
 tests whether TraceLane can freeze a historical task and baseline, preserve a
 direct or plan→build OpenCode session tree, capture the final workspace and
 diff, run independent acceptance checks, and retain provider cost evidence.
 
-The sample is intentionally too small for statistical inference. The results
-must not be described as evidence that either workflow is generally better.
+The sample is intentionally too small and the tasks too simple for functional
+or statistical comparison. The results validate the measurement chain only;
+they must not be described as evidence that either workflow is generally
+better.
 
 ## Frozen results
 
@@ -50,6 +52,10 @@ These are descriptive measurements of two task pairs, not an estimated
 workflow effect. More frozen tasks and repeated runs are required before any
 comparative claim.
 
+Both workflows achieved the same binary functional result on both tasks. Day 1
+therefore provides no evidence of a functional-quality difference; its visible
+differences are limited to tokens, cost, and wall time.
+
 ## Adapter limitation
 
 OpenCode CLI did not reliably switch an existing session from `plan` to
@@ -58,6 +64,22 @@ independent CLI sessions. During import, the build session is explicitly
 linked as a child of the plan root and the attempt records
 `phase_link: manual-cli-split`. The link is an adapter assertion, not a native
 OpenCode parent relationship.
+
+The manual split also did not freeze the exact plan text as an input to the
+build session. Future plan→build attempts must use the frozen plan-artifact
+handoff so that the build can be attributed to a specific plan digest.
+
+## Pilot limitations
+
+- BR-01 and BR-02 are narrow, localized fixes and do not separate planning
+  quality from implementation quality.
+- Each workflow-task cell has one run, so run-to-run model variance is unknown.
+- Binary acceptance hides partial correctness and which behavioral invariant
+  failed. Later tasks may emit criterion-level `TRACELANE_SCORE` results.
+- BR-01 acceptance ran with pandas 3.0.5. The historical production pandas
+  version was not pinned, so this is not an exact recreation of that runtime.
+- The plan→build session relationship is manually asserted, as described
+  above.
 
 ## Reproduction and artifacts
 
