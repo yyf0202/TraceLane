@@ -88,9 +88,14 @@ def _adjudicated_score(
     spec: experiment.AttemptSpec,
     worktree: Path,
 ) -> dict[str, object] | None:
-    if spec.task.short_id != "BR-07":
+    graders = {
+        "BR-07": "br07_v2_hidden_acceptance.py",
+        "BR-08": "br08_v2_hidden_acceptance.py",
+    }
+    grader_name = graders.get(spec.task.short_id)
+    if grader_name is None:
         return None
-    grader = ROOT / "tests/fixtures/coding_tasks/br07_v2_hidden_acceptance.py"
+    grader = ROOT / "tests/fixtures/coding_tasks" / grader_name
     result = subprocess.run(
         [str(experiment.GRADER_PYTHON), str(grader), "."],
         cwd=worktree,
@@ -100,10 +105,10 @@ def _adjudicated_score(
     )
     score = _score_output(result.stdout, "TRACELANE_SCORE=")
     if score is None:
-        raise ValueError(f"{spec.run_slug} has no BR-07 v2 adjudicated score")
+        raise ValueError(f"{spec.run_slug} has no v2 adjudicated score")
     return {
         **score,
-        "grader": "br07_v2_hidden_acceptance.py",
+        "grader": grader_name,
         "grader_version": 2,
         "runner_exit_code": result.returncode,
     }
