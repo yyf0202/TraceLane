@@ -114,6 +114,35 @@ def _adjudicated_score(
     }
 
 
+def _adjudicated_plan_score(
+    spec: experiment.AttemptSpec,
+    plan_path: Path,
+) -> dict[str, object] | None:
+    gates = {
+        "BR-06": "day2_v2_plan_acceptance.py",
+        "BR-08": "day2_v3_plan_acceptance.py",
+    }
+    gate_name = gates.get(spec.task.short_id)
+    if gate_name is None or not plan_path.exists():
+        return None
+    gate = ROOT / "tests/fixtures/coding_tasks" / gate_name
+    result = subprocess.run(
+        [str(experiment.PYTHON), str(gate), str(plan_path), spec.task.short_id],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    score = _score_output(result.stdout, "TRACELANE_PLAN_SCORE=")
+    if score is None:
+        raise ValueError(f"{spec.run_slug} has no adjudicated plan score")
+    return {
+        **score,
+        "gate": gate_name,
+        "gate_version": 2 if spec.task.short_id == "BR-06" else 3,
+        "runner_exit_code": result.returncode,
+    }
+
+
 def _termination(raw: Path, cli_name: str) -> dict[str, object] | None:
     path = raw / f"{cli_name}.termination.json"
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
@@ -214,6 +243,7 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
         else None
     )
     plan_score = _prefixed_score(raw / "plan-gate.log", "TRACELANE_PLAN_SCORE=")
+    adjudicated_plan_score = _adjudicated_plan_score(spec, plan_path)
     score = _prefixed_score(raw / "independent-grader.log", "TRACELANE_SCORE=")
     if score is None:
         raise ValueError(f"{spec.run_slug} has no independent functional score")
@@ -273,6 +303,11 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
     finalized.store.write_json("output/workflow-end.json", workflow_end)
     if plan_score is not None:
         finalized.store.write_json("output/plan-gate-score.json", plan_score)
+    if adjudicated_plan_score is not None:
+        finalized.store.write_json(
+            "output/adjudicated-plan-gate-score.json",
+            adjudicated_plan_score,
+        )
     trace_bytes = sum((raw / f"{row['session_id']}.jsonl").stat().st_size for row in cli_rows)
     provider_rejected = any(
         phase["state"] == "provider_rejected_before_stream" for phase in diagnoses
@@ -290,6 +325,16 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
         "execution_reason": executions[-1]["reason"],
         "build_started": spec.workflow == "direct-build" or len(sessions) == 2,
         "plan_score": plan_score["earned"] if plan_score else None,
+        "adjudicated_plan_score": (
+            adjudicated_plan_score["earned"] if adjudicated_plan_score else None
+        ),
+        "analysis_plan_score": (
+            adjudicated_plan_score["earned"]
+            if adjudicated_plan_score
+            else plan_score["earned"]
+            if plan_score
+            else None
+        ),
         "functional_score": score["earned"],
         "functional_possible": score["possible"],
         "adjudicated_functional_score": (

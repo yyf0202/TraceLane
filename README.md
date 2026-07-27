@@ -47,4 +47,22 @@ TraceLane 是一个 coding agent 评测仓库。
 
 [完整记录](docs/experiments/2026-07-27-br05-serial-pair.md)
 
-样本还少，而且中途更换过 provider。目前只能描述这些 run，不能据此声称 plan→build 或 direct-build 普遍更好。
+### Day 2：三个复杂任务、三个模型
+
+36 个预注册槽位严格串行运行。5 条被 Ark 配额窗口拒绝，6 条 plan 被旧 gate
+错误拦下；这些样本保留在故障与 gate 记录中，不混入功能配对。剩余 9 个可分析配对里，
+plan→build 平均 48.3/100，direct-build 平均 56.7/100，plan 赢 3、平 3、输 3。
+
+| Model | 可分析配对 | Direct 平均 | Plan 平均 | 平均差 |
+| --- | ---: | ---: | ---: | ---: |
+| deepseek-v4-pro | 4 | 30.0 | 56.2 | +26.2 |
+| glm-5.2 | 2 | 100.0 | 100.0 | 0.0 |
+| kimi-k2.7-code | 3 | 63.3 | 3.3 | -60.0 |
+
+各模型留下的可分析任务构成不同，这张表不能当作模型排名。旧 gate 放行 6/16 个
+配额有效 plan；版本化裁决认为 12 个应通过，其中 6 个没有 build 结果。
+
+[完整记录](docs/experiments/2026-07-27-day2-results.md)
+
+样本仍少，而且存在 provider 与 gate 缺失数据。目前只能描述这些 run，不能据此声称
+某种工作流或模型普遍更好。
