@@ -1,0 +1,13 @@
+{
+  "schema_version": "frozen-coding-suite/v0.1",
+  "suite_id": "bericher-v0.3",
+  "repository_id": "BeRicher_v0.45",
+  "tasks": [
+    "../bericher-v0.2/tasks/BR-01-pit-value-date-v2.json",
+    "../bericher-v0.1/tasks/BR-02-expanded-static-detection.json",
+    "../bericher-v0.1/tasks/BR-03-auto-compact-daily-run.json",
+    "../bericher-v0.1/tasks/BR-04-expanded-static-inference.json",
+    "tasks/BR-05-t1-causality-alignment-v2.json"
+  ],
+  "notes": "Calibrates BR-05 to a 2,000,000 total provider-token budget after three direct-build pilot attempts exceeded the v1 220,000-token budget before completing. Runtime enforcement counts uncached input, cached input, output, and reasoning tokens and also enforces wall and tool-call limits."
+}

@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""Run one OpenCode phase with enforced wall, tool-call, and provider-token budgets."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import signal
+import subprocess
+import time
+from pathlib import Path
+
+from tracelane.contracts import canonical_json
+
+
+def _arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--worktree", required=True, type=Path)
+    parser.add_argument("--raw-directory", required=True, type=Path)
+    parser.add_argument("--cli-name", required=True)
+    parser.add_argument("--title", required=True)
+    parser.add_argument("--agent", choices=("plan", "build"), required=True)
+    prompt = parser.add_mutually_exclusive_group(required=True)
+    prompt.add_argument("--prompt")
+    prompt.add_argument("--prompt-file", type=Path)
+    parser.add_argument("--session")
+    parser.add_argument("--max-wall-seconds", type=int, required=True)
+    parser.add_argument("--max-tool-calls", type=int, required=True)
+    parser.add_argument("--max-model-tokens", type=int, required=True)
+    return parser.parse_args()
+
+
+def _api_key() -> str:
+    configured = os.environ.get("OPENCODE_API_KEY", "").strip()
+    if configured:
+        return configured
+    result = subprocess.run(
+        [
+            "security",
+            "find-generic-password",
+            "-a",
+            "opencode-tracelane",
+            "-s",
+            "opencode-go-api-key",
+            "-w",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    key = result.stdout.strip()
+    if not key:
+        raise ValueError("OpenCode API key is empty")
+    return key
+
+
+def _consume(
+    path: Path,
+    *,
+    offset: int,
+    pending: bytes,
+    metrics: dict[str, int],
+    final: bool = False,
+) -> tuple[int, bytes]:
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        chunk = handle.read()
+        offset = handle.tell()
+    value = pending + chunk
+    lines = value.splitlines(keepends=True)
+    pending = b""
+    if lines and not lines[-1].endswith((b"\n", b"\r")) and not final:
+        pending = lines.pop()
+    for raw_line in lines:
+        if not raw_line.strip():
+            continue
+        try:
+            row = json.loads(raw_line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if row.get("type") == "tool_use":
+            metrics["tool_calls"] += 1
+        part = row.get("part")
+        if not isinstance(part, dict) or part.get("type") != "step-finish":
+            continue
+        tokens = part.get("tokens")
+        if not isinstance(tokens, dict):
+            continue
+        metrics["input_tokens"] += int(tokens.get("input", 0))
+        metrics["output_tokens"] += int(tokens.get("output", 0))
+        metrics["reasoning_tokens"] += int(tokens.get("reasoning", 0))
+        cache = tokens.get("cache")
+        if isinstance(cache, dict):
+            metrics["cached_input_tokens"] += int(cache.get("read", 0))
+    metrics["model_tokens"] = sum(
+        metrics[name]
+        for name in (
+            "input_tokens",
+            "cached_input_tokens",
+            "output_tokens",
+            "reasoning_tokens",
+        )
+    )
+    return offset, pending
+
+
+def _terminate(process: subprocess.Popen[bytes]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=10)
+    except ProcessLookupError:
+        return
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+
+
+def main() -> int:
+    args = _arguments()
+    if min(args.max_wall_seconds, args.max_tool_calls, args.max_model_tokens) <= 0:
+        raise ValueError("budgets must be positive")
+    if not args.binary.is_file() or not args.worktree.is_dir():
+        raise ValueError("binary and worktree must exist")
+    message = (
+        args.prompt_file.read_text(encoding="utf-8")
+        if args.prompt_file is not None
+        else args.prompt
+    )
+    assert isinstance(message, str)
+    args.raw_directory.mkdir(parents=True, exist_ok=True)
+    cli_path = args.raw_directory / args.cli_name
+    stderr_path = args.raw_directory / f"{args.cli_name}.stderr.log"
+    result_path = args.raw_directory / f"{args.cli_name}.execution.json"
+    if cli_path.exists() or stderr_path.exists() or result_path.exists():
+        raise ValueError("phase output paths must not already exist")
+
+    command = [
+        str(args.binary),
+        "run",
+        "--pure",
+        "--auto",
+        "--model",
+        "opencode-go/glm-5.2",
+        "--agent",
+        args.agent,
+        "--format",
+        "json",
+        "--dir",
+        str(args.worktree.resolve()),
+        "--title",
+        args.title,
+    ]
+    if args.session:
+        command.extend(("--session", args.session))
+    command.append(message)
+    environment = os.environ.copy()
+    environment["OPENCODE_API_KEY"] = _api_key()
+    environment["OPENCODE_TRACELANE_DIR"] = str(args.raw_directory.resolve())
+    metrics = {
+        "tool_calls": 0,
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "model_tokens": 0,
+    }
+    started = time.monotonic()
+    reason = "completed"
+    with cli_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+        process = subprocess.Popen(
+            command,
+            cwd=args.worktree,
+            env=environment,
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=True,
+        )
+        offset = 0
+        pending = b""
+        while process.poll() is None:
+            time.sleep(1)
+            offset, pending = _consume(
+                cli_path,
+                offset=offset,
+                pending=pending,
+                metrics=metrics,
+            )
+            elapsed = time.monotonic() - started
+            if elapsed > args.max_wall_seconds:
+                reason = "wall_budget_exhausted"
+            elif metrics["tool_calls"] > args.max_tool_calls:
+                reason = "tool_budget_exhausted"
+            elif metrics["model_tokens"] > args.max_model_tokens:
+                reason = "token_budget_exhausted"
+            if reason != "completed":
+                _terminate(process)
+                break
+        exit_code = process.poll()
+    _consume(cli_path, offset=offset, pending=pending, metrics=metrics, final=True)
+    elapsed_ms = round((time.monotonic() - started) * 1_000)
+    if reason == "completed" and exit_code != 0:
+        reason = "crashed"
+    result = {
+        "schema_version": "opencode-budget-execution/v0.1",
+        "reason": reason,
+        "exit_code": exit_code,
+        "wall_ms": elapsed_ms,
+        "budgets": {
+            "max_wall_seconds": args.max_wall_seconds,
+            "max_tool_calls": args.max_tool_calls,
+            "max_model_tokens": args.max_model_tokens,
+        },
+        "usage": metrics,
+    }
+    result_path.write_text(canonical_json(result) + "\n", encoding="utf-8")
+    print(canonical_json(result))
+    return 0 if reason == "completed" else 124
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

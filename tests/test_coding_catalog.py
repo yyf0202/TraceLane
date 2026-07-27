@@ -8,6 +8,7 @@ from tracelane.coding import load_coding_task
 ROOT = Path(__file__).resolve().parents[1]
 SUITE = ROOT / "fixtures" / "coding" / "bericher-v0.1" / "suite.json"
 SUITE_V2 = ROOT / "fixtures" / "coding" / "bericher-v0.2" / "suite.json"
+SUITE_V3 = ROOT / "fixtures" / "coding" / "bericher-v0.3" / "suite.json"
 
 
 def test_bericher_frozen_suite_loads_all_tasks() -> None:
@@ -54,3 +55,16 @@ def test_bericher_v2_adds_high_complexity_causal_task() -> None:
     )
     assert "data/**" in br05.diff_policy.protected_paths
     assert br05.max_model_tokens == 220_000
+
+
+def test_bericher_v3_calibrates_br05_enforced_token_budget() -> None:
+    manifest = json.loads(SUITE_V3.read_text(encoding="utf-8"))
+    tasks = [
+        load_coding_task(json.loads((SUITE_V3.parent / relative).read_text(encoding="utf-8")))
+        for relative in manifest["tasks"]
+    ]
+
+    br05 = tasks[-1]
+    assert br05.task_id == "BR-05-t1-causality-alignment"
+    assert br05.version == 2
+    assert br05.max_model_tokens == 2_000_000
