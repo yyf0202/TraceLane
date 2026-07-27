@@ -1,0 +1,51 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-04-expanded-static-inference",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "74aac005142d4be9ae8999d8073da9dfabee9bd2",
+    "tree_sha256": "2d9979e59316aaa240af3846c40e7b609ac06c979ba10e89f1edeb8ec8b0c8dd"
+  },
+  "objective": "Propagate expanded_static through inference feature-pipeline construction for expanded models. Derive the flag from model metadata in both daily_runner paths, and key daily_run feature caches by both feature version and expanded-static mode so incompatible feature frames cannot be reused.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile src/cli/daily_run.py src/paper_trading/daily_runner.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br04_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"b341685b3eabadce518591a1e680ceee9eb54ceb5d68d38a632f89f622f14cff\" && python3 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br04_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "src/cli/daily_run.py",
+      "src/paper_trading/daily_runner.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg"
+  ],
+  "budget": {
+    "max_wall_seconds": 1200,
+    "max_tool_calls": 140,
+    "max_model_tokens": 140000
+  }
+}

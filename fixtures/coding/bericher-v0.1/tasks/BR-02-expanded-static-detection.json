@@ -1,0 +1,51 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-02-expanded-static-detection",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "b6cec7f5f9df0b950494adae8b613281e60847db",
+    "tree_sha256": "20fb7370bde985f63c2c164ffed76a7e6a1089bd614b33296676da393e9c803d"
+  },
+  "objective": "In src/cli/daily_run.py, add one reusable expanded-static detection helper. It must return true when static_feature_cols has more than two entries or when feature_cols contains at least two of pb, revenue_yoy, ocfps, and current_ratio. Replace both inline checks in phase_tick_all with the helper.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile src/cli/daily_run.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br02_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"b07158514665eb835cb06b8d30199d1eb935f69a0aaae4e5037a59cd1879bef6\" && /tmp/pitval_venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br02_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "src/cli/daily_run.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg",
+    "/tmp/pitval_venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 900,
+    "max_tool_calls": 100,
+    "max_model_tokens": 100000
+  }
+}

@@ -32,6 +32,7 @@ def finalize_coding_attempt(
     command_history: Sequence[CommandEvidence] = (),
     input_tokens: int = 0,
     output_tokens: int = 0,
+    provider_cost: Mapping[str, object] | None = None,
     repeat: int = 1,
 ) -> FinalizedCodingAttempt:
     """Import one completed coding attempt and independently grade its final workspace."""
@@ -54,4 +55,6 @@ def finalize_coding_attempt(
         output_tokens=output_tokens,
     )
     store.write_json("output/coding-grades.json", grades.to_dict())
+    if provider_cost is not None:
+        store.write_json("output/provider-cost.json", dict(provider_cost))
     return FinalizedCodingAttempt(store=store, grades=grades)

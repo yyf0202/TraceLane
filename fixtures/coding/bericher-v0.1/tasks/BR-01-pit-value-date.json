@@ -1,0 +1,51 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-01-pit-value-date",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "fe847541f7ffa9808cf51eeec186ee124ba418ce",
+    "tree_sha256": "79e42ba38800062778e67ce26765b60da9ee1344649348fbc1582ddf1f00f91b"
+  },
+  "objective": "In src/components/data_fetcher_tushare.py, make pit_value_date explicitly fall back to ann_date when f_ann_date is missing, while using the later YYYYMMDD value when both dates exist. Never perform a mixed string/NaN row-wise max.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile src/components/data_fetcher_tushare.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br01_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"be3441c871f7e0f646ec111c93a8f9af066b2f38ebe407ba57b0c37bc7d08aad\" && /tmp/pitval_venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br01_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "src/components/data_fetcher_tushare.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg",
+    "/tmp/pitval_venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 900,
+    "max_tool_calls": 100,
+    "max_model_tokens": 100000
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-03-auto-compact-daily-run",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "da09c73795c04a1fe8a72877b529eac987d4bdfc",
+    "tree_sha256": "a245311dfe78b0b8d3fc3ecc8ede7b780273093c201b31c7bd748b9e6e919df8"
+  },
+  "objective": "Prevent accumulated incremental parquet fragments from degrading the daily pipeline. Add a threshold-or-weekly auto-compaction entry point, call it before shared data loading from both daily update flows, rotate the daily log, and raise the scheduled daily-run timeout to four hours.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile scripts/compact_incremental.py scripts/scheduled_daily_run.py src/cli/daily_run.py src/cli/update_data.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br03_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"39719be85dd0ceb86d97ec0b9746c471c9d5b39a07f6dedfe37ebbaeb08434e4\" && python3 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br03_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "scripts/compact_incremental.py",
+      "scripts/scheduled_daily_run.py",
+      "src/cli/daily_run.py",
+      "src/cli/update_data.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg"
+  ],
+  "budget": {
+    "max_wall_seconds": 1200,
+    "max_tool_calls": 140,
+    "max_model_tokens": 140000
+  }
+}

@@ -38,9 +38,7 @@ def requires_nan_safe_implementation(repository: Path) -> None:
     start = source.index("if 'f_ann_date' in df.columns:")
     end = source.index("                    # 4. 保存", start)
     block = source[start:end]
-    assert ".fillna(" in block or ".isna()" in block, (
-        "missing f_ann_date must explicitly fall back"
-    )
+    assert ".fillna(" in block or ".isna()" in block, "missing f_ann_date must explicitly fall back"
     assert "[['ann_date', 'f_ann_date']].max(axis=1)" not in block, (
         "mixed string/NaN row-wise max is incompatible with the deployment pandas version"
     )

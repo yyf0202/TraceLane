@@ -10,6 +10,7 @@ from tracelane.coding.contracts import (
     InteractionScript,
     RepositoryBaseline,
     SessionRef,
+    load_coding_task,
 )
 
 
@@ -86,3 +87,23 @@ def test_attempt_end_and_session_refs_capture_optional_phase_tree() -> None:
 def test_attempt_end_rejects_unknown_reason() -> None:
     with pytest.raises(ValueError, match="reason"):
         AttemptEnd(reason="maybe", final_answer=None)
+
+
+def test_coding_task_round_trips_through_canonical_loader() -> None:
+    loaded = load_coding_task(task().to_dict())
+    assert loaded == task()
+    assert loaded.task_sha256 == task().task_sha256
+
+
+def test_coding_task_loader_rejects_unknown_fields() -> None:
+    value = task().to_dict()
+    value["unexpected"] = True
+    with pytest.raises(ValueError, match="fields"):
+        load_coding_task(value)
+
+
+def test_coding_task_loader_rejects_string_instead_of_command_array() -> None:
+    value = task().to_dict()
+    value["acceptance"]["public_commands"] = "python3 -m pytest"
+    with pytest.raises(ValueError, match="string arrays"):
+        load_coding_task(value)

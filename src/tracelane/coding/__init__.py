@@ -8,6 +8,7 @@ from tracelane.coding.contracts import (
     InteractionScript,
     RepositoryBaseline,
     SessionRef,
+    load_coding_task,
 )
 from tracelane.coding.orchestrator import FinalizedCodingAttempt, finalize_coding_attempt
 
@@ -19,6 +20,7 @@ __all__ = [
     "InteractionScript",
     "RepositoryBaseline",
     "SessionRef",
+    "load_coding_task",
     "FinalizedCodingAttempt",
     "finalize_coding_attempt",
 ]

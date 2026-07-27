@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
@@ -253,3 +254,97 @@ class AttemptEnd:
 
 def canonical_task_json(task: CodingTask) -> str:
     return canonical_json(task.to_dict())
+
+
+def load_coding_task(value: Mapping[str, object]) -> CodingTask:
+    """Load the canonical ``coding-task/v0.1`` mapping into validated contracts."""
+    if not isinstance(value, Mapping):
+        raise ValueError("coding task must be a mapping")
+    expected = {
+        "schema_version",
+        "task_id",
+        "version",
+        "baseline",
+        "objective",
+        "acceptance",
+        "diff_policy",
+        "interaction",
+        "allowed_commands",
+        "budget",
+    }
+    if set(value) != expected or value.get("schema_version") != "coding-task/v0.1":
+        raise ValueError("coding task fields or schema_version are invalid")
+    baseline = value.get("baseline")
+    acceptance = value.get("acceptance")
+    diff_policy = value.get("diff_policy")
+    interaction = value.get("interaction")
+    budget = value.get("budget")
+    if not all(
+        isinstance(item, Mapping)
+        for item in (baseline, acceptance, diff_policy, interaction, budget)
+    ):
+        raise ValueError("coding task nested fields must be mappings")
+    assert isinstance(baseline, Mapping)
+    assert isinstance(acceptance, Mapping)
+    assert isinstance(diff_policy, Mapping)
+    assert isinstance(interaction, Mapping)
+    assert isinstance(budget, Mapping)
+    nested_fields = (
+        (baseline, {"repository_id", "commit_sha", "tree_sha256"}),
+        (acceptance, {"public_commands", "hidden_commands"}),
+        (
+            diff_policy,
+            {"editable_paths", "protected_paths", "ignored_paths"},
+        ),
+        (interaction, {"mode", "requires_approval"}),
+        (
+            budget,
+            {"max_wall_seconds", "max_tool_calls", "max_model_tokens"},
+        ),
+    )
+    if any(set(item) != expected for item, expected in nested_fields):
+        raise ValueError("coding task nested fields are invalid")
+
+    sequence_fields = (
+        acceptance["public_commands"],
+        acceptance["hidden_commands"],
+        diff_policy["editable_paths"],
+        diff_policy["protected_paths"],
+        diff_policy["ignored_paths"],
+        value["allowed_commands"],
+    )
+    if any(
+        not isinstance(item, (list, tuple)) or any(not isinstance(member, str) for member in item)
+        for item in sequence_fields
+    ):
+        raise ValueError("coding task command and path fields must be string arrays")
+    try:
+        return CodingTask(
+            task_id=value["task_id"],
+            version=value["version"],
+            baseline=RepositoryBaseline(
+                repository_id=baseline["repository_id"],
+                commit_sha=baseline["commit_sha"],
+                tree_sha256=baseline["tree_sha256"],
+            ),
+            objective=value["objective"],
+            acceptance=AcceptanceSpec(
+                public_commands=tuple(acceptance["public_commands"]),
+                hidden_commands=tuple(acceptance["hidden_commands"]),
+            ),
+            diff_policy=DiffPolicy(
+                editable_paths=tuple(diff_policy["editable_paths"]),
+                protected_paths=tuple(diff_policy["protected_paths"]),
+                ignored_paths=tuple(diff_policy.get("ignored_paths", ())),
+            ),
+            interaction=InteractionScript(
+                mode=interaction["mode"],
+                requires_approval=interaction["requires_approval"],
+            ),
+            allowed_commands=tuple(value["allowed_commands"]),
+            max_wall_seconds=budget["max_wall_seconds"],
+            max_tool_calls=budget["max_tool_calls"],
+            max_model_tokens=budget["max_model_tokens"],
+        )
+    except (KeyError, TypeError) as exc:
+        raise ValueError("coding task nested fields are invalid") from exc

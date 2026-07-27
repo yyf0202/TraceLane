@@ -28,7 +28,17 @@ def load_helper(repository: Path):
 
 if __name__ == "__main__":
     helper = load_helper(Path(sys.argv[1]))
-    assert helper({"extra": {"static_feature_cols": []}, "data": {"feature_cols": ["close", "pb", "revenue_yoy"]}})
+    assert helper(
+        {
+            "extra": {"static_feature_cols": []},
+            "data": {"feature_cols": ["close", "pb", "revenue_yoy"]},
+        }
+    )
     assert helper({"extra": {"static_feature_cols": ["a", "b", "c"]}, "data": {"feature_cols": []}})
-    assert not helper({"extra": {"static_feature_cols": ["a", "b"]}, "data": {"feature_cols": ["close", "volume"]}})
+    assert not helper(
+        {
+            "extra": {"static_feature_cols": ["a", "b"]},
+            "data": {"feature_cols": ["close", "volume"]},
+        }
+    )
     print("BR-02 independent acceptance passed")

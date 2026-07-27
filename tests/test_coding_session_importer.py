@@ -86,3 +86,37 @@ def test_task_level_import_rejects_orphaned_session(tmp_path: Path) -> None:
         assert "root" in str(exc)
     else:
         raise AssertionError("orphaned session must be rejected")
+
+
+def test_task_level_import_redacts_local_paths_in_frozen_session(tmp_path: Path) -> None:
+    observed = OpenCodeSession(
+        session_id="ses_build",
+        observations=(
+            {
+                "schema": "tracelane-opencode-observation/v0.1",
+                "observed_at": "2026-07-27T00:00:00Z",
+                "type": "tool.execute.after",
+                "session_id": "ses_build",
+                "payload": {"output": "read /Users/private/repository/source.py"},
+            },
+        ),
+    )
+    store = import_coding_attempt(
+        task(),
+        attempt_id="attempt-redacted",
+        sessions=(
+            AttemptSession(
+                SessionRef("ses_build", "ses_build", None, "build"),
+                observed,
+            ),
+        ),
+        initial_workspace=snapshot(),
+        final_workspace=snapshot(),
+        end=AttemptEnd(reason="completed", final_answer="Done."),
+        artifact_root=tmp_path,
+        harness_config={},
+    )
+
+    frozen = (store.run_dir / "input" / "sessions" / "ses_build.json").read_text(encoding="utf-8")
+    assert "/Users/private" not in frozen
+    assert "[LOCAL_PATH]" in frozen

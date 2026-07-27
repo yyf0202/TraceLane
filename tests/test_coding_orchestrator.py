@@ -75,8 +75,13 @@ def test_finalize_coding_attempt_writes_one_graded_run(tmp_path: Path) -> None:
         repository=repository,
         artifact_root=tmp_path / "artifacts",
         harness_config={"workflow": "direct-build"},
+        provider_cost={"currency": "USD", "amount": 0.25},
     )
 
     assert finalized.grades.overall == "pass"
     grades = json.loads((finalized.store.run_dir / "output" / "coding-grades.json").read_text())
     assert grades["acceptance"]["status"] == "pass"
+    provider_cost = json.loads(
+        (finalized.store.run_dir / "output" / "provider-cost.json").read_text()
+    )
+    assert provider_cost == {"amount": 0.25, "currency": "USD"}

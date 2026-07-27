@@ -39,11 +39,8 @@ def _validate_sessions(sessions: tuple[AttemptSession, ...]) -> str:
     if len(root_refs) != 1 or root_refs[0].parent_session_id is not None:
         raise ValueError("attempt root session must be present without a parent")
     known = set(ids)
-    if any(
-        item.ref.parent_session_id not in known
-        for item in sessions
-        if item.ref.parent_session_id
-    ):
+    parent_ids = (item.ref.parent_session_id for item in sessions if item.ref.parent_session_id)
+    if any(parent_id not in known for parent_id in parent_ids):
         raise ValueError("attempt session parent must be included in the attempt")
     return root
 
@@ -156,9 +153,10 @@ def import_coding_attempt(
         },
     )
     for item in sessions:
+        sanitized_observations = classify_and_redact(item.session.observations).value
         store.write_json(
             Path("input/sessions") / f"{item.ref.session_id}.json",
-            {"ref": item.ref.__dict__, "observations": item.session.observations},
+            {"ref": item.ref.__dict__, "observations": sanitized_observations},
         )
     for label, snapshot in (("initial", initial_workspace), ("final", final_workspace)):
         store.write_json(Path("workspace") / f"{label}.json", snapshot.to_dict())

@@ -1,0 +1,12 @@
+{
+  "schema_version": "frozen-coding-suite/v0.1",
+  "suite_id": "bericher-v0.1",
+  "repository_id": "BeRicher_v0.45",
+  "tasks": [
+    "tasks/BR-01-pit-value-date.json",
+    "tasks/BR-02-expanded-static-detection.json",
+    "tasks/BR-03-auto-compact-daily-run.json",
+    "tasks/BR-04-expanded-static-inference.json"
+  ],
+  "notes": "Historical bug-fix tasks frozen from BeRicher commits. BR-01 and BR-02 are the Day 1 vertical-slice pair; BR-03 and BR-04 expand the next evaluation set."
+}
