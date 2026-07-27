@@ -1,0 +1,12 @@
+{
+  "schema_version": "frozen-coding-suite/v0.1",
+  "suite_id": "bericher-v0.5",
+  "repository_id": "BeRicher_v0.45",
+  "tasks": [
+    "tasks/BR-06-adv10-holding-exemption.json",
+    "tasks/BR-07-factorvae-crash-resilience.json",
+    "tasks/BR-08-simulation-catchup.json",
+    "tasks/BR-09-v5-simulation-routing.json"
+  ],
+  "notes": "Four historical fixes outside invalid-data handling. BR-06/07/08 are the preregistered Day 2 tasks; BR-09 is frozen as reserve. Plan gates use tests/fixtures/coding_tasks/day2_plan_acceptance.py at SHA256 618810f856b7a387f0d239998d271084187c317b8d1953ced9ef915683921e47 and require 100/100 before build."
+}

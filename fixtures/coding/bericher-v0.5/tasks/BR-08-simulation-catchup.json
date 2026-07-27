@@ -1,0 +1,54 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-08-simulation-catchup",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "b483022cf90c3ccdc94ecdd5f165a10781760996",
+    "tree_sha256": "fe00a44052e744d1fd89d10a8826c089b619a1ff90f245661d974c7bbaf9132f"
+  },
+  "objective": "Make the scheduled paper-trading pipeline calendar-aware and automatically catch simulations up after missed days. Prefer the cached exchange calendar with a weekday fallback, skip non-trading days unless --force is supplied, classify each simulation from its last NAV date, group lagging simulations by model, run one date-range catch-up per model group from the earliest required date, preserve per-simulation outcomes, and retain the existing single-day fast path for new, current, or already-run simulations.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile src/cli/daily_run.py scripts/scheduled_daily_run.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br08_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"7297a62f642245b97383c590e354281648c0817971f3a2b7a16d91188966d9ef\" && /Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br08_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "src/cli/daily_run.py",
+      "scripts/scheduled_daily_run.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**",
+      "outputs/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg",
+    "sed",
+    "/Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  }
+}

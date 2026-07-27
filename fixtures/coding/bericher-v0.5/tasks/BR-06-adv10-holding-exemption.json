@@ -1,0 +1,57 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-06-adv10-holding-exemption",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "78c32a231570bfdcc5c0ffdd2e64d98274a6ee73",
+    "tree_sha256": "862deec8c7c1beab3579eb60e5ac9cfa15b1496002bf2b8db9b87519d744a9f4"
+  },
+  "objective": "Replace noisy single-day liquidity filtering with a per-symbol, date-sorted ADV10 computed from amount using a 10-session rolling mean with five-session warmup. Use ADV10 for new-entry filtering while falling back to amount when unavailable, and exempt current holdings so liquidity is an entry gate rather than a forced sell trigger. Pass holdings from the backtest engine, route v4 models through the enhanced data source, and use a 30,000-thousand-yuan default threshold.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile config.py src/backtest/engine.py src/backtest/interfaces.py src/backtest/strategy.py src/cli/daily_run.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br06_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"a5dea72a9b250ced9fe5da1993bbb70b0b91abd9bb02c8ea89c7830d066d2d3a\" && /Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br06_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "config.py",
+      "src/backtest/engine.py",
+      "src/backtest/interfaces.py",
+      "src/backtest/strategy.py",
+      "src/cli/daily_run.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**",
+      "outputs/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg",
+    "sed",
+    "/Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  }
+}

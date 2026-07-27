@@ -1,0 +1,54 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-09-v5-simulation-routing",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "27d879e964403b4bb034986850bec5671e3228d1",
+    "tree_sha256": "f5e87cf29f464b1b42999f0d16d12e4b158f0447ddd162855fa1df93991d88be"
+  },
+  "objective": "Make V5 alpha and alpha_plus simulations use the required enhanced market-data sources in both range and daily execution paths: alpha needs the v2-class sources and alpha_plus also needs chip-distribution data. Extend bt2025 rebuild discovery to both V4.6 and V5 clone families and replace V4.6-specific display shortening with a common sim_kfold prefix helper used throughout reports.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile src/paper_trading/daily_runner.py scripts/rebuild_bt2025.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br09_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"9dd3f87f20a1c536cbf08880042f9c532bcfde761308c25626fc0b56152fbfc4\" && /Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br09_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "src/paper_trading/daily_runner.py",
+      "scripts/rebuild_bt2025.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**",
+      "outputs/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg",
+    "sed",
+    "/Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  }
+}
