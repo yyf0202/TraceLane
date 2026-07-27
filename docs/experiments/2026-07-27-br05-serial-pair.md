@@ -108,3 +108,11 @@ Keep execution serial. Run the pre-registered third independently clean matched
 pair with the same prompt, model, baseline, task budget, plan gate, and grader.
 Do not interpret aggregate pass rates or efficiency distributions as
 statistically stable after only three repeats.
+
+### Provider boundary after R2
+
+The OpenCode Go quota was exhausted after R2. Any later repeat using
+`ark/glm-5.2` must record Ark as its provider and treat the endpoint change as an
+experimental boundary. A matched pair remains interpretable when both workflows
+use the same Ark provider, but Ark latency, token accounting, caching, and cost
+must not be pooled with R1–R2 as though provider conditions were unchanged.

@@ -22,6 +22,12 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--cli-name", required=True)
     parser.add_argument("--title", required=True)
     parser.add_argument("--agent", choices=("plan", "build"), required=True)
+    parser.add_argument("--provider-id", default="opencode-go")
+    parser.add_argument("--model-id", default="glm-5.2")
+    parser.add_argument("--provider-name")
+    parser.add_argument("--base-url")
+    parser.add_argument("--api-key-service", default="opencode-go-api-key")
+    parser.add_argument("--api-key-env", default="OPENCODE_API_KEY")
     prompt = parser.add_mutually_exclusive_group(required=True)
     prompt.add_argument("--prompt")
     prompt.add_argument("--prompt-file", type=Path)
@@ -32,8 +38,8 @@ def _arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _api_key() -> str:
-    configured = os.environ.get("OPENCODE_API_KEY", "").strip()
+def _api_key(environment_name: str, service: str) -> str:
+    configured = os.environ.get(environment_name, "").strip()
     if configured:
         return configured
     result = subprocess.run(
@@ -43,7 +49,7 @@ def _api_key() -> str:
             "-a",
             "opencode-tracelane",
             "-s",
-            "opencode-go-api-key",
+            service,
             "-w",
         ],
         check=True,
@@ -54,6 +60,28 @@ def _api_key() -> str:
     if not key:
         raise ValueError("OpenCode API key is empty")
     return key
+
+
+def _provider_config(args: argparse.Namespace) -> str | None:
+    if args.base_url is None:
+        return None
+    return canonical_json(
+        {
+            "provider": {
+                args.provider_id: {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": args.provider_name or args.provider_id,
+                    "env": [args.api_key_env],
+                    "options": {"baseURL": args.base_url},
+                    "models": {
+                        args.model_id: {
+                            "name": args.model_id,
+                        }
+                    },
+                }
+            }
+        }
+    )
 
 
 def _consume(
@@ -142,7 +170,7 @@ def main() -> int:
         "--pure",
         "--auto",
         "--model",
-        "opencode-go/glm-5.2",
+        f"{args.provider_id}/{args.model_id}",
         "--agent",
         args.agent,
         "--format",
@@ -156,7 +184,10 @@ def main() -> int:
         command.extend(("--session", args.session))
     command.append(message)
     environment = os.environ.copy()
-    environment["OPENCODE_API_KEY"] = _api_key()
+    environment[args.api_key_env] = _api_key(args.api_key_env, args.api_key_service)
+    provider_config = _provider_config(args)
+    if provider_config is not None:
+        environment["OPENCODE_CONFIG_CONTENT"] = provider_config
     environment["OPENCODE_TRACELANE_DIR"] = str(args.raw_directory.resolve())
     metrics = {
         "tool_calls": 0,
@@ -204,6 +235,8 @@ def main() -> int:
         reason = "crashed"
     result = {
         "schema_version": "opencode-budget-execution/v0.1",
+        "provider": args.provider_id,
+        "model": args.model_id,
         "reason": reason,
         "exit_code": exit_code,
         "wall_ms": elapsed_ms,
