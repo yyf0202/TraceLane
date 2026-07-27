@@ -53,15 +53,16 @@ def diagnose_last_provider_turn(
         raise ValueError("observed provider turn has no request ID")
     types = {str(row.get("type")) for row in rows}
     state = "request_not_dispatched"
-    if "provider.http.request.started" in types:
+    if "model.request.dispatching" in types or "provider.http.request.started" in types:
         state = "gateway_no_response_headers"
     if "provider.http.response.headers" in types:
         state = "gateway_no_first_token"
     if "model.response.first_chunk" in types:
         state = "stream_interrupted"
-    if "model.stream.completed" in types:
+    stream_failed = bool({"model.stream.error", "model.stream.aborted"} & types)
+    if "model.stream.completed" in types and not stream_failed:
         state = "model_completed_processor_incomplete"
-    if "model.processor.finalized" in types:
+    if "model.processor.finalized" in types and not stream_failed:
         state = "completed"
 
     http_status = _last_payload_integer(rows, "provider.http.response.headers", "status")

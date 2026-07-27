@@ -89,6 +89,7 @@ def test_import_preserves_unmapped_opencode_events(tmp_path: Path) -> None:
     ("event_types", "expected"),
     [
         ([], "request_not_dispatched"),
+        (["model.request.dispatching", "model.stream.error"], "gateway_no_response_headers"),
         (["provider.http.request.started"], "gateway_no_response_headers"),
         (
             ["provider.http.request.started", "provider.http.response.headers"],
@@ -100,6 +101,15 @@ def test_import_preserves_unmapped_opencode_events(tmp_path: Path) -> None:
                 "provider.http.response.headers",
                 "model.response.first_chunk",
                 "model.stream.error",
+            ],
+            "stream_interrupted",
+        ),
+        (
+            [
+                "model.request.dispatching",
+                "model.response.first_chunk",
+                "model.stream.error",
+                "model.processor.finalized",
             ],
             "stream_interrupted",
         ),
