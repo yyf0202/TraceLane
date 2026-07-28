@@ -23,6 +23,11 @@ PLAN_GATE = day3.ROOT / "tests/fixtures/coding_tasks/day3_plan_acceptance_v5.py"
 ADJUDICATOR = (
     day3.ROOT / "tests/fixtures/coding_tasks/br12_hidden_acceptance_v2.py"
 )
+ADJUDICATOR_LABEL = "v2"
+
+
+def _adjudicator_log(raw: Path) -> Path:
+    return raw / f"adjudicated-grader-{ADJUDICATOR_LABEL}.log"
 
 
 def _run_log(command: list[str], *, cwd: Path, output: Path) -> int:
@@ -63,7 +68,7 @@ def adjudicate_plan() -> None:
 
 def adjudicate_build(run_slug: str) -> None:
     raw = execution.RAW_ROOT / run_slug
-    destination = raw / "adjudicated-grader-v2.log"
+    destination = _adjudicator_log(raw)
     if destination.exists():
         return
     worktree = execution.WORK_ROOT / f"bericher-{run_slug}"
@@ -108,7 +113,7 @@ def recover_direct_build(interruption: dict[str, object]) -> None:
     if raw.exists():
         required = (
             raw / "workflow-end.json",
-            raw / "adjudicated-grader-v2.log",
+            _adjudicator_log(raw),
         )
         if all(path.exists() for path in required):
             return
@@ -165,7 +170,7 @@ def recover_direct_build(interruption: dict[str, object]) -> None:
     _run_log(
         [str(execution.GRADER_PYTHON), str(ADJUDICATOR), "."],
         cwd=worktree,
-        output=raw / "adjudicated-grader-v2.log",
+        output=_adjudicator_log(raw),
     )
     execution._write_end(
         raw,

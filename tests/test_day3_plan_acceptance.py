@@ -14,6 +14,10 @@ GATE_V5 = (
     Path(__file__).parent
     / "fixtures/coding_tasks/day3_plan_acceptance_v5.py"
 )
+GATE_V6 = (
+    Path(__file__).parent
+    / "fixtures/coding_tasks/day3_plan_acceptance_v6.py"
+)
 
 
 def _run(tmp_path: Path, task: str, content: str) -> subprocess.CompletedProcess[str]:
@@ -47,6 +51,19 @@ def _run_v5(
     plan.write_text(json.dumps({"content": content}), encoding="utf-8")
     return subprocess.run(
         [sys.executable, str(GATE_V5), str(plan), task],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_v6(
+    tmp_path: Path, task: str, content: str
+) -> subprocess.CompletedProcess[str]:
+    plan = tmp_path / "plan-v6.json"
+    plan.write_text(json.dumps({"content": content}), encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(GATE_V6), str(plan), task],
         capture_output=True,
         text=True,
         check=False,
@@ -181,3 +198,35 @@ def test_br12_v5_still_rejects_wrong_recipe_despite_equivalent_block_wording(
     result = _run_v5(tmp_path, "BR-12", content)
     assert result.returncode == 1
     assert '"earned": 75' in result.stdout
+
+
+def test_br12_v6_accepts_explicit_set_e_and_errorlevel_control_flow(
+    tmp_path: Path,
+) -> None:
+    content = """
+    Inside each epoch loop call trainer.model.set_epoch(epoch, args.epochs) before training.
+    Add equivalent POSIX and Windows launchers with the same model,
+    feature/static, k-fold/purge, date, batch and seed recipe. Main arm uses
+    kl-beta 0.5, lambda-recon 1 and warmup; prior-only control uses kl-beta 0
+    and lambda-recon 0. --main-only skips control. POSIX set -e stops after a
+    non-zero main; Windows uses if errorlevel 1 goto :error before control.
+    Validate with py_compile, bash -n and git diff --check.
+    """
+    result = _run_v6(tmp_path, "BR-12", content)
+    assert result.returncode == 0, result.stdout
+
+
+def test_br12_v6_rejects_contradictory_always_run_control(
+    tmp_path: Path,
+) -> None:
+    content = """
+    Inside each epoch loop call trainer.model.set_epoch(epoch, args.epochs) before training.
+    Add equivalent POSIX and Windows launchers with the same model,
+    feature/static, k-fold/purge, date, batch and seed recipe. Main arm uses
+    kl-beta 0.5, lambda-recon 1 and warmup; prior-only control uses kl-beta 0
+    and lambda-recon 0. --main-only skips control. Mention set -e and
+    errorlevel, but regardless of main failure always run the control.
+    Validate with py_compile, bash -n and git diff --check.
+    """
+    result = _run_v6(tmp_path, "BR-12", content)
+    assert result.returncode == 1
