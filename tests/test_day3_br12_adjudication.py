@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 V2 = ROOT / "tests/fixtures/coding_tasks/br12_hidden_acceptance_v2.py"
 V3 = ROOT / "tests/fixtures/coding_tasks/br12_hidden_acceptance_v3.py"
 V4 = ROOT / "tests/fixtures/coding_tasks/br12_hidden_acceptance_v4.py"
+V5 = ROOT / "tests/fixtures/coding_tasks/br12_hidden_acceptance_v5.py"
 
 
 def _run(repository: Path) -> subprocess.CompletedProcess[str]:
@@ -33,6 +34,15 @@ def _run_v3(repository: Path) -> subprocess.CompletedProcess[str]:
 def _run_v4(repository: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(V4), str(repository)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_v5(repository: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(V5), str(repository)],
         capture_output=True,
         text=True,
         check=False,
@@ -215,3 +225,52 @@ def test_v4_scores_glm_r2_without_crashing() -> None:
     result = _run_v4(repository)
     assert result.returncode == 1
     assert '"earned": 60' in result.stdout
+
+
+def test_v5_ignores_unrelated_unclosed_multiline_quote(tmp_path: Path) -> None:
+    _write_training(tmp_path)
+    _write_variable_launchers(tmp_path)
+    shell = tmp_path / "scripts/train_factorvae_phase1.sh"
+    shell.write_text(
+        shell.read_text(encoding="utf-8").replace(
+            "set -e\n",
+            'set -e\nVALUE=$(python3 -c "\nprint("unrelated")\n")\n',
+        ),
+        encoding="utf-8",
+    )
+    result = _run_v5(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_v5_rejects_malformed_training_invocation_without_crashing(
+    tmp_path: Path,
+) -> None:
+    _write_training(tmp_path)
+    _write_variable_launchers(tmp_path)
+    shell = tmp_path / "scripts/train_factorvae_phase1.sh"
+    shell.write_text(
+        shell.read_text(encoding="utf-8").replace(
+            "python src/cli/kfold_train.py kfold-train $COMMON "
+            "--kl-beta 0.5",
+            'python src/cli/kfold_train.py kfold-train "$COMMON '
+            "--kl-beta 0.5",
+        ),
+        encoding="utf-8",
+    )
+    result = _run_v5(tmp_path)
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+
+
+def test_v5_scores_deepseek_r1_without_crashing() -> None:
+    repository = Path(
+        "/Users/efunyang/Documents/Codex/2026-07-26/"
+        "realtime-voice-chat-3/work/"
+        "bericher-day3v2-br-12-dsv4pro-r1-direct-build"
+    )
+    if not repository.exists():
+        return
+    result = _run_v5(repository)
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "TRACELANE_SCORE=" in result.stdout
