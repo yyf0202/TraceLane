@@ -143,6 +143,69 @@ def build_report(value: dict[str, object]) -> str:
             "experiment store.",
         ]
     )
+
+    budget_exclusions = [
+        row for row in rows if not row.get("budget_integrity_valid", True)
+    ]
+    provider_failures = [
+        row for row in rows if not row.get("provider_transport_valid", True)
+    ]
+    lines.extend(
+        [
+            "",
+            "## Integrity and reliability",
+            "",
+            f"{len(budget_exclusions)} attempts keep their functional evidence but are "
+            "excluded from capability comparisons because evaluator recoveries exceeded "
+            "the frozen combined token budget:",
+            "",
+        ]
+    )
+    lines.extend(
+        f"- `{row['attempt_id']}`: "
+        f"{row['budget_integrity_exclusion']['charged_model_tokens']} charged tokens."
+        for row in budget_exclusions
+    )
+    lines.extend(
+        [
+            "",
+            f"{len(provider_failures)} attempts are provider-invalid reliability evidence, "
+            "not functional zeroes:",
+            "",
+        ]
+    )
+    lines.extend(
+        f"- `{row['attempt_id']}`: terminal provider state "
+        f"`{row['provider_turns'][-1]['state']}`."
+        for row in provider_failures
+    )
+
+    layers = value.get("layers", {})
+    replay_rows = (
+        layers.get("gate_replay", [])
+        if isinstance(layers, dict)
+        else []
+    )
+    if replay_rows:
+        lines.extend(
+            [
+                "",
+                "## Gate replay layer",
+                "",
+                "These builds reuse frozen plans under corrected gates. They are diagnostic",
+                "counterfactuals and are not mixed into the 36-slot paired matrix.",
+                "",
+                "| Task | Model | Source slot | Score | Tokens | Seconds |",
+                "|---|---|---|---:|---:|---:|",
+            ]
+        )
+        for row in replay_rows:
+            lines.append(
+                f"| {row['task']} | {row['model']} | "
+                f"`{row['canonical_attempt_id']}` | "
+                f"{row['analysis_functional_score']} | {row['model_tokens']} | "
+                f"{int(row['wall_ms']) / 1000:.1f} |"
+            )
     return "\n".join(lines) + "\n"
 
 

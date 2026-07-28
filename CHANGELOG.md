@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Day 3 imports all 36 frozen slots plus three separately labeled gate replays into
+  independent run stores, resolves versioned recovery evidence without rewriting raw
+  attempts, applies the final task adjudicators consistently, and excludes three
+  over-budget evaluator recoveries and three Ark HTTP 429 failures from capability pairs.
 - Day 3 preregisters 36 strictly serial BR-10–12 attempts across three Ark models,
   two workflows, and two alternating-order repeats.
 - Day 3 v2 preserves and excludes an infrastructure pilot, makes isolated configuration

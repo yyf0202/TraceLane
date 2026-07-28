@@ -1,0 +1,98 @@
+{
+  "schema_version": "coding-eval-day3-analysis-resolution/v0.1",
+  "experiment_id": "tracelane-opencode-day3-v2",
+  "frozen_slots_unchanged": true,
+  "primary_evidence_overrides": {
+    "day3v2-br-10-k2.7code-r1-direct-build": "day3v2-br-10-k2.7code-r1-direct-build-operator-restart-v1",
+    "day3v2-br-10-k2.7code-r2-direct-build": "day3v2-br-10-k2.7code-r2-direct-build-operator-restart-v2",
+    "day3v2-br-11-dsv4pro-r1-plan-build": "day3v2-br-11-dsv4pro-r1-plan-build-operator-restart-v3",
+    "day3v2-br-11-dsv4pro-r2-direct-build": "day3v2-br-11-dsv4pro-r2-direct-build-operator-restart-br11-v3",
+    "day3v2-br-11-dsv4pro-r2-plan-build": "day3v2-br-11-dsv4pro-r2-plan-build-operator-restart-br11-v4",
+    "day3v2-br-11-k2.7code-r1-direct-build": "day3v2-br-11-k2.7code-r1-direct-build-operator-restart-br11-grader-v5",
+    "day3v2-br-11-glm52-r1-direct-build": "day3v2-br-11-glm52-r1-direct-build-operator-restart-br11-grader-v6",
+    "day3v2-br-11-glm52-r2-plan-build": "day3v2-br-11-glm52-r2-plan-build-external-restart-v1",
+    "day3v2-br-12-k2.7code-r1-plan-build": "day3v2-br-12-k2.7code-r1-plan-build-operator-restart-br12-grader-v2",
+    "day3v2-br-12-k2.7code-r2-direct-build": "day3v2-br-12-k2.7code-r2-direct-build-operator-restart-br12-plan-gate-v5",
+    "day3v2-br-12-glm52-r1-plan-build": "day3v2-br-12-glm52-r1-plan-build-operator-restart-br12-grader-v3",
+    "day3v2-br-12-glm52-r1-direct-build": "day3v2-br-12-glm52-r1-direct-build-operator-restart-br12-plan-gate-v6",
+    "day3v2-br-12-glm52-r2-plan-build": "day3v2-br-12-glm52-r2-plan-build-operator-restart-br12-grader-v4"
+  },
+  "split_phase_attempts": {
+    "day3v2-br-11-glm52-r2-plan-build": {
+      "plan_source": "day3v2-br-11-glm52-r2-plan-build",
+      "interrupted_build_source": "day3v2-br-11-glm52-r2-plan-build",
+      "terminal_build_source": "day3v2-br-11-glm52-r2-plan-build-external-restart-v1"
+    }
+  },
+  "charged_partial_sources": {
+    "day3v2-br-10-k2.7code-r2-direct-build": [
+      "day3v2-br-10-k2.7code-r2-direct-build"
+    ],
+    "day3v2-br-11-dsv4pro-r1-plan-build": [
+      "day3v2-br-11-dsv4pro-r1-plan-build"
+    ],
+    "day3v2-br-11-dsv4pro-r2-direct-build": [
+      "day3v2-br-11-dsv4pro-r2-direct-build"
+    ],
+    "day3v2-br-11-k2.7code-r1-direct-build": [
+      "day3v2-br-11-k2.7code-r1-direct-build",
+      "day3v2-br-11-k2.7code-r1-direct-build-operator-restart-br11-plan-gate-v3"
+    ],
+    "day3v2-br-11-glm52-r1-direct-build": [
+      "day3v2-br-11-glm52-r1-direct-build-operator-restart-br11-plan-gate-v4"
+    ],
+    "day3v2-br-12-k2.7code-r1-plan-build": [
+      "day3v2-br-12-k2.7code-r1-plan-build"
+    ],
+    "day3v2-br-12-k2.7code-r2-direct-build": [
+      "day3v2-br-12-k2.7code-r2-direct-build"
+    ],
+    "day3v2-br-12-glm52-r1-plan-build": [
+      "day3v2-br-12-glm52-r1-plan-build"
+    ],
+    "day3v2-br-12-glm52-r1-direct-build": [
+      "day3v2-br-12-glm52-r1-direct-build"
+    ],
+    "day3v2-br-12-glm52-r2-plan-build": [
+      "day3v2-br-12-glm52-r2-plan-build"
+    ]
+  },
+  "budget_integrity_exclusions": {
+    "day3v2-br-11-dsv4pro-r1-plan-build": {
+      "charged_model_tokens": 2269107,
+      "reason": "The evaluator recovery reran the plan without deducting the interrupted plan usage from the combined task budget."
+    },
+    "day3v2-br-11-k2.7code-r1-direct-build": {
+      "charged_model_tokens": 3225981,
+      "reason": "Two evaluator interruptions plus the terminal recovery exceeded the frozen direct-build budget."
+    },
+    "day3v2-br-11-glm52-r1-direct-build": {
+      "charged_model_tokens": 2311278,
+      "reason": "The evaluator interruption was not deducted from the terminal recovery budget."
+    }
+  },
+  "gate_replays": [
+    {
+      "source_attempt": "day3v2-br-11-dsv4pro-r2-plan-build",
+      "attempt_id": "day3v2-br-11-dsv4pro-r2-plan-build-gate-replay-br11-plan-v3"
+    },
+    {
+      "source_attempt": "day3v2-br-11-glm52-r1-plan-build",
+      "attempt_id": "day3v2-br-11-glm52-r1-plan-build-gate-replay-br11-plan-v4"
+    },
+    {
+      "source_attempt": "day3v2-br-12-glm52-r1-plan-build",
+      "attempt_id": "day3v2-br-12-glm52-r1-plan-build-gate-replay-br12-plan-v6"
+    }
+  ],
+  "provider_failures": {
+    "day3v2-br-12-dsv4pro-r1-plan-build": "Ark HTTP 429 after seven completed provider turns; the failing turn produced no first token.",
+    "day3v2-br-12-dsv4pro-r2-plan-build": "Ark HTTP 429 before the first token of the first provider turn.",
+    "day3v2-br-12-dsv4pro-r2-direct-build": "Ark HTTP 429 before the first token of the first provider turn."
+  },
+  "analysis_policy": {
+    "gate_replays_are_separate": true,
+    "budget_integrity_exclusions_keep_scores_but_are_not_capability_eligible": true,
+    "provider_failures_are_reliability_evidence_not_functional_zeroes": true
+  }
+}

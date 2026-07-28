@@ -84,14 +84,24 @@ BR-07 随后用新 ID 再做一次恢复，6 条均获得稳定响应。三个�
 
 [Day 2 分层总表](docs/experiments/2026-07-28-day2-consolidated.md)
 
+### Day 3：跨任务矩阵
+
+BR-10–12 的 36 个预注册槽位已完成并导入，另保留 3 条独立 gate replay。只有
+6/18 个配对同时满足 provider、预算和 build 完整性：direct-build 平均 75.0，
+plan→build 平均 69.2；plan 赢 1、平 3、输 2。这只是 BeRicher 上的描述性结果。
+
+3 条 Ark HTTP 429 和 3 条累计超预算的 evaluator recovery 不进入能力对比；
+gate replay 也不混入原矩阵。
+
+[结果](docs/experiments/2026-07-28-day3-results.md) ·
+[任务集](docs/experiments/bericher-v0.9-taskset.md) ·
+[预注册](docs/experiments/2026-07-28-day3-preregistration.md)
+
 ## 接下来
 
-BR-10–12 已冻结为 Day 3 复杂任务，覆盖跨平台提交状态、实盘调度时序和训练
-checkpoint 状态。预注册矩阵包含三个模型、两种 workflow 和两次重复，共 36 条；
-它们尚未计入上面的结果。
+现有数据可用于验证 Meta-Harness 的导入、提案、隔离构建和盲测 plumbing，但正式
+优化实验仍需要更多未被 proposer 看过的跨任务 holdout。
 
-[任务集](docs/experiments/bericher-v0.9-taskset.md) ·
-[Day 3 预注册](docs/experiments/2026-07-28-day3-preregistration.md) ·
 [Meta-Harness 就绪性](docs/experiments/2026-07-28-meta-harness-readiness.md)
 
 实验统一从 `scripts/coding_eval.py` 进入。正式运行前会串行检查所有 provider；
