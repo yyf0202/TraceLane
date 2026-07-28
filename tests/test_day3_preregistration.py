@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import run_day3_coding_eval as experiment  # noqa: E402
 
-PREREG = ROOT / "fixtures/coding/bericher-v0.9/day3-experiment.json"
+PREREG = ROOT / "fixtures/coding/bericher-v0.9/day3-experiment-v2.json"
 
 
 def _sha256(path: Path) -> str:
@@ -55,9 +55,24 @@ def test_day3_frozen_input_hashes_match() -> None:
         == frozen["shared_execution_engine_sha256"]
     )
     assert (
+        _sha256(ROOT / "scripts/run_day3_coding_eval.py")
+        == frozen["matrix_runner_sha256"]
+    )
+    assert (
         _sha256(ROOT / "scripts/prepare_opencode_plan_handoff.py")
         == frozen["plan_handoff_sha256"]
     )
     for task in experiment.TASKS:
         assert _sha256(task.manifest) == frozen["task_manifest_sha256"][task.short_id]
         assert _sha256(task.grader) == frozen["hidden_grader_sha256"][task.short_id]
+
+
+def test_day3_v2_preserves_and_excludes_infrastructure_pilot() -> None:
+    value = json.loads(PREREG.read_text(encoding="utf-8"))
+    assert value["supersedes"] == "tracelane-opencode-day3"
+    excluded = value["excluded_infrastructure_pilot"]
+    assert [row["state"] for row in excluded] == [
+        "completed",
+        "build_request_not_dispatched",
+        "operator_interrupted",
+    ]

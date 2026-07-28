@@ -41,6 +41,18 @@ The machine-readable preregistration freezes the exact 36-slot order and hashes 
 harness, gate, task manifests, hidden graders, attempt runner, shared execution engine and
 plan handoff.
 
+## V2 amendment before restart
+
+The original matrix halted after three pilot slots. The first direct attempt completed,
+but the matched plan's build process never dispatched: plan and build shared a raw directory,
+and the runner treated the already-created isolated configuration directory as an error.
+The next plan was operator-interrupted immediately after diagnosis.
+
+Those three raw attempts are preserved as an infrastructure-pilot layer and excluded from
+the 36-slot analysis. V2 makes configuration-directory creation phase-safe, records operator
+interruptions without orphaning OpenCode, changes every formal attempt ID to `day3v2-*`, and
+freezes new runner hashes before restart. No model attempt is silently retried.
+
 ## Analysis boundary
 
 The primary metric is the independent weighted functional score. Model tokens and wall

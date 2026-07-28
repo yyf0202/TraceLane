@@ -270,7 +270,7 @@ def main() -> int:
     if provider_config is not None:
         environment["OPENCODE_CONFIG_CONTENT"] = provider_config
     isolated_config = args.raw_directory / ".xdg-config"
-    isolated_config.mkdir()
+    isolated_config.mkdir(exist_ok=True)
     environment["XDG_CONFIG_HOME"] = str(isolated_config.resolve())
     environment["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
     environment["OPENCODE_DISABLE_EXTERNAL_SKILLS"] = "1"
@@ -301,38 +301,57 @@ def main() -> int:
         )
         offset = 0
         pending = b""
-        while process.poll() is None:
-            time.sleep(1)
-            offset, pending = _consume(
-                cli_path,
-                offset=offset,
-                pending=pending,
-                metrics=metrics,
-            )
-            elapsed = time.monotonic() - started
-            if elapsed > args.max_wall_seconds:
-                reason = "wall_budget_exhausted"
-            elif metrics["tool_calls"] > args.max_tool_calls:
-                reason = "tool_budget_exhausted"
-            elif metrics["model_tokens"] > args.max_model_tokens:
-                reason = "token_budget_exhausted"
-            if reason != "completed":
-                termination_path.write_text(
-                    canonical_json(
-                        {
-                            "schema_version": "opencode-local-termination/v0.1",
-                            "source": "local_budget",
-                            "reason": reason,
-                            "signal": "SIGTERM",
-                            "wall_ms": round(elapsed * 1_000),
-                            "usage_at_termination": metrics,
-                        }
-                    )
-                    + "\n",
-                    encoding="utf-8",
+        try:
+            while process.poll() is None:
+                time.sleep(1)
+                offset, pending = _consume(
+                    cli_path,
+                    offset=offset,
+                    pending=pending,
+                    metrics=metrics,
                 )
-                _terminate(process)
-                break
+                elapsed = time.monotonic() - started
+                if elapsed > args.max_wall_seconds:
+                    reason = "wall_budget_exhausted"
+                elif metrics["tool_calls"] > args.max_tool_calls:
+                    reason = "tool_budget_exhausted"
+                elif metrics["model_tokens"] > args.max_model_tokens:
+                    reason = "token_budget_exhausted"
+                if reason != "completed":
+                    termination_path.write_text(
+                        canonical_json(
+                            {
+                                "schema_version": "opencode-local-termination/v0.1",
+                                "source": "local_budget",
+                                "reason": reason,
+                                "signal": "SIGTERM",
+                                "wall_ms": round(elapsed * 1_000),
+                                "usage_at_termination": metrics,
+                            }
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    _terminate(process)
+                    break
+        except KeyboardInterrupt:
+            reason = "operator_interrupted"
+            elapsed = time.monotonic() - started
+            termination_path.write_text(
+                canonical_json(
+                    {
+                        "schema_version": "opencode-local-termination/v0.1",
+                        "source": "operator",
+                        "reason": reason,
+                        "signal": "SIGTERM",
+                        "wall_ms": round(elapsed * 1_000),
+                        "usage_at_termination": metrics,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            _terminate(process)
         exit_code = process.poll()
     _consume(cli_path, offset=offset, pending=pending, metrics=metrics, final=True)
     elapsed_ms = round((time.monotonic() - started) * 1_000)

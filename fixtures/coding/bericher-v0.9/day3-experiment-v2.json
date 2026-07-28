@@ -1,0 +1,123 @@
+{
+  "schema_version": "coding-eval-preregistration/v0.2",
+  "experiment_id": "tracelane-opencode-day3-v2",
+  "status": "frozen-before-first-v2-attempt",
+  "supersedes": "tracelane-opencode-day3",
+  "amendment_reason": "The original cohort was halted after an isolated config directory collision prevented the first plan build from dispatching. V2 fixes phase-shared config creation, uses new attempt IDs, and excludes all three original pilot slots.",
+  "excluded_infrastructure_pilot": [
+    {
+      "attempt_id": "day3-br-10-glm52-r1-direct-build",
+      "state": "completed",
+      "reason": "Cohort aborted before its matched pair produced a build outcome."
+    },
+    {
+      "attempt_id": "day3-br-10-glm52-r1-plan-build",
+      "state": "build_request_not_dispatched",
+      "reason": "Plan completed and gate passed, but the local runner collided on the phase-shared isolated config directory."
+    },
+    {
+      "attempt_id": "day3-br-10-glm52-r2-plan-build",
+      "state": "operator_interrupted",
+      "reason": "The matrix was stopped immediately after the infrastructure defect was identified."
+    }
+  ],
+  "provider": "ark",
+  "models": [
+    "glm-5.2",
+    "deepseek-v4-pro",
+    "kimi-k2.7-code"
+  ],
+  "tasks": [
+    "BR-10",
+    "BR-11",
+    "BR-12"
+  ],
+  "workflows": [
+    "direct-build",
+    "plan-build"
+  ],
+  "repeats": 2,
+  "execution": {
+    "strictly_serial": true,
+    "alternating_pair_order": true,
+    "automatic_attempt_retries": 0,
+    "provider_turn_watchdog_seconds": 300,
+    "shared_pair_budget": {
+      "max_wall_seconds": 1800,
+      "max_tool_calls": 220,
+      "max_model_tokens": 2000000
+    },
+    "plan_phase_cap": {
+      "max_wall_seconds": 900,
+      "max_tool_calls": 80,
+      "max_model_tokens": 1000000
+    }
+  },
+  "frozen_inputs": {
+    "harness_id": "opencode-h0-06d9803be9",
+    "harness_manifest_sha256": "e1e231b7bc730f8467528756d17ce12b099ae1cad8dc46735fe71bb970a3288a",
+    "plan_gate_sha256": "605acf3ed4c2cde47bd5ca9de0d7f28766ac3d52665a2be73fcfe176e86fa14e",
+    "attempt_runner_sha256": "d28a33afbd11842879ad8549f3f114e5cb3ed1eaaace7f4ff64d62775db412de",
+    "matrix_runner_sha256": "0796773feba5b8f30b57dc6204401d2a35abfa8bc5542888a5e5b587a3760046",
+    "shared_execution_engine_sha256": "a147d5b72eaea560607c3f61e212987ab673cdd9429710d359d04d96ee8eb4d1",
+    "plan_handoff_sha256": "64571588b794b90c0b363e7531e5a0427b31386b62fba02352f1296f2f89ba9f",
+    "task_manifest_sha256": {
+      "BR-10": "7c1f9cb2a5f89d5e71dbb8834c12a89235691a10221b0a9be2dc71ba2d831531",
+      "BR-11": "e75e56108ce5208e1c2a291fe35a47469d6d4e074f153bbeddb49ac6cea061cf",
+      "BR-12": "064a38478d78069608517a77acde85100a8a202a188d7995aa448c6b2cee2918"
+    },
+    "hidden_grader_sha256": {
+      "BR-10": "8f5f9cf5aef17fd591c729b2284dea6ffdd9ab6035a6d54eec69fd37c4e571a6",
+      "BR-11": "9417a2eb956b37b29b0a626b0bba33e1cb47f105db195e48b637e5eedfbd83d0",
+      "BR-12": "82d615c0907857884d5968e515f5ac7cee8734d07d38fd14072591dcd0d8f5e5"
+    }
+  },
+  "attempt_order": [
+    "day3v2-br-10-glm52-r1-direct-build",
+    "day3v2-br-10-glm52-r1-plan-build",
+    "day3v2-br-10-glm52-r2-plan-build",
+    "day3v2-br-10-glm52-r2-direct-build",
+    "day3v2-br-10-dsv4pro-r1-plan-build",
+    "day3v2-br-10-dsv4pro-r1-direct-build",
+    "day3v2-br-10-dsv4pro-r2-direct-build",
+    "day3v2-br-10-dsv4pro-r2-plan-build",
+    "day3v2-br-10-k2.7code-r1-direct-build",
+    "day3v2-br-10-k2.7code-r1-plan-build",
+    "day3v2-br-10-k2.7code-r2-plan-build",
+    "day3v2-br-10-k2.7code-r2-direct-build",
+    "day3v2-br-11-dsv4pro-r1-plan-build",
+    "day3v2-br-11-dsv4pro-r1-direct-build",
+    "day3v2-br-11-dsv4pro-r2-direct-build",
+    "day3v2-br-11-dsv4pro-r2-plan-build",
+    "day3v2-br-11-k2.7code-r1-direct-build",
+    "day3v2-br-11-k2.7code-r1-plan-build",
+    "day3v2-br-11-k2.7code-r2-plan-build",
+    "day3v2-br-11-k2.7code-r2-direct-build",
+    "day3v2-br-11-glm52-r1-plan-build",
+    "day3v2-br-11-glm52-r1-direct-build",
+    "day3v2-br-11-glm52-r2-direct-build",
+    "day3v2-br-11-glm52-r2-plan-build",
+    "day3v2-br-12-k2.7code-r1-direct-build",
+    "day3v2-br-12-k2.7code-r1-plan-build",
+    "day3v2-br-12-k2.7code-r2-plan-build",
+    "day3v2-br-12-k2.7code-r2-direct-build",
+    "day3v2-br-12-glm52-r1-plan-build",
+    "day3v2-br-12-glm52-r1-direct-build",
+    "day3v2-br-12-glm52-r2-direct-build",
+    "day3v2-br-12-glm52-r2-plan-build",
+    "day3v2-br-12-dsv4pro-r1-direct-build",
+    "day3v2-br-12-dsv4pro-r1-plan-build",
+    "day3v2-br-12-dsv4pro-r2-plan-build",
+    "day3v2-br-12-dsv4pro-r2-direct-build"
+  ],
+  "analysis": {
+    "primary_metric": "independent weighted functional score",
+    "resource_metrics": [
+      "model_tokens",
+      "wall_ms"
+    ],
+    "provider_failure": "missing capability observation, retained in reliability layer",
+    "plan_gate_block": "retained for calibration, excluded from build-completion pairs",
+    "claim_scope": "descriptive, BeRicher-only, no statistical-significance claim"
+  }
+}

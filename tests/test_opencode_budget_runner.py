@@ -36,10 +36,18 @@ def _fake_binary(path: Path, *, token_count: int) -> Path:
     return path
 
 
-def _run(tmp_path: Path, *, token_count: int, budget: int) -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path,
+    *,
+    token_count: int,
+    budget: int,
+    existing_config_home: bool = False,
+) -> subprocess.CompletedProcess[str]:
     worktree = tmp_path / "worktree"
     worktree.mkdir()
     binary = _fake_binary(tmp_path / "fake-opencode", token_count=token_count)
+    if existing_config_home:
+        (tmp_path / "raw" / ".xdg-config").mkdir(parents=True)
     environment = os.environ.copy()
     environment["OPENCODE_API_KEY"] = "test-only"
     return subprocess.run(
@@ -99,6 +107,20 @@ def test_runner_enforces_total_provider_token_budget(tmp_path: Path) -> None:
     assert termination["source"] == "local_budget"
     assert termination["reason"] == "token_budget_exhausted"
     assert termination["signal"] == "SIGTERM"
+
+
+def test_runner_reuses_phase_shared_isolated_config_home(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        token_count=100,
+        budget=50,
+        existing_config_home=True,
+    )
+    assert result.returncode == 124
+    execution = json.loads(
+        (tmp_path / "raw" / "cli.jsonl.execution.json").read_text(encoding="utf-8")
+    )
+    assert execution["reason"] == "token_budget_exhausted"
 
 
 def test_runner_enforces_wall_budget(tmp_path: Path) -> None:

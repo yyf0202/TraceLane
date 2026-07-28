@@ -37,6 +37,7 @@ TASKS = (
     ),
 )
 MODELS = experiment.MODELS
+EXPERIMENT_DAY = "day3v2"
 
 
 def matrix() -> list[experiment.AttemptSpec]:
@@ -58,7 +59,7 @@ def matrix() -> list[experiment.AttemptSpec]:
                             model,
                             repeat,
                             first,
-                            experiment_day="day3",
+                            experiment_day=EXPERIMENT_DAY,
                             harness_manifest=HARNESS,
                         ),
                         experiment.AttemptSpec(
@@ -66,7 +67,7 @@ def matrix() -> list[experiment.AttemptSpec]:
                             model,
                             repeat,
                             second,
-                            experiment_day="day3",
+                            experiment_day=EXPERIMENT_DAY,
                             harness_manifest=HARNESS,
                         ),
                     )

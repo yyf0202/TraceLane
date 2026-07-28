@@ -11,6 +11,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Day 3 preregisters 36 strictly serial BR-10–12 attempts across three Ark models,
   two workflows, and two alternating-order repeats.
+- Day 3 v2 preserves and excludes an infrastructure pilot, makes isolated configuration
+  phase-safe, and records operator interruption without leaving an OpenCode child process.
 - OpenCode H0 freezes the complete buildable fork source, archive, binary, execution
   isolation, and future Meta-Harness candidate boundary.
 - BR-10–12 semantic plan gates accept equivalent designs while rejecting plans whose
