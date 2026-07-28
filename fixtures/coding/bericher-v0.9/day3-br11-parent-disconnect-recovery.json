@@ -1,0 +1,11 @@
+{
+  "schema_version": "coding-eval-disconnect-amendment/v0.1",
+  "task_id": "BR-11",
+  "interrupted_attempt": "day3v2-br-11-glm52-r2-plan-build",
+  "classification": "external_parent_disconnect_during_nonterminal_build",
+  "terminal_model_stop_observed": false,
+  "frozen_plan_reused": true,
+  "replacement_suffix": "external-restart-v1",
+  "budget_policy": "deduct completed plan and interrupted partial build usage from the original paired budget",
+  "automatic_retry_count": 0
+}
