@@ -1,0 +1,13 @@
+{
+  "schema_version": "coding-eval-plan-gate-amendment/v0.1",
+  "task_id": "BR-11",
+  "frozen_primary_result_unchanged": true,
+  "supersedes_for_future_and_replay": "day3_plan_acceptance_v3.py",
+  "reason": "V3 applied ordering regexes to raw Markdown and rejected explicit before-daily_run semantics separated by emphasis and inline-code punctuation.",
+  "replacement_gate": "tests/fixtures/coding_tasks/day3_plan_acceptance_v4.py",
+  "source_plan_run": "day3v2-br-11-glm52-r1-plan-build",
+  "replay_layer": "gate-replay",
+  "interrupted_next_attempt": "day3v2-br-11-glm52-r1-direct-build",
+  "replacement_next_suffix": "operator-restart-br11-plan-gate-v4",
+  "automatic_retry_count": 0
+}
