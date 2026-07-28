@@ -1,0 +1,23 @@
+{
+  "schema_version": "coding-eval-adjudication/v0.1",
+  "experiment_id": "tracelane-opencode-day3-v2-br10-adjudication-v3",
+  "parent_adjudication": "tracelane-opencode-day3-v2-br10-adjudication",
+  "status": "frozen-before-resume",
+  "trigger": {
+    "finding": "BR-10 v2 functional adjudicator rejected an equivalent helper-based implementation.",
+    "operator_interrupted_attempt": "day3v2-br-10-k2.7code-r2-direct-build",
+    "model_tokens_observed": 42125,
+    "tool_calls_observed": 6
+  },
+  "policy": {
+    "frozen_v1_and_v2_outputs_preserved": true,
+    "v3_scores_are_adjudications": true,
+    "remaining_primary_gate": "frozen-v1",
+    "automatic_retries": 0
+  },
+  "replacement_attempt": "day3v2-br-10-k2.7code-r2-direct-build-operator-restart-v2",
+  "frozen_inputs": {
+    "functional_adjudicator_sha256": "3bc7b9614a9510fcf1337450cf2262839ac6337878d0f80cb818873faf49f062",
+    "resume_runner_sha256": "d01856a31e41b7459297f0d69dae74224114d35a975407ce2bbe1bd88e66df4c"
+  }
+}

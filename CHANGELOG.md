@@ -18,6 +18,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   equivalent Windows file-size checks after observed v1 false negatives.
 - A Day 3 recovery amendment preserves the zero-token operator interruption, replaces only
   that Kimi slot with a new ID, and keeps corrected-gate builds in a separate replay layer.
+- BR-10 v3 adjudication accepts equivalent helper-based push and size-gate decomposition
+  while preserving the frozen v1/v2 outputs and replacing the diagnosis-interrupted slot.
 - OpenCode H0 freezes the complete buildable fork source, archive, binary, execution
   isolation, and future Meta-Harness candidate boundary.
 - BR-10–12 semantic plan gates accept equivalent designs while rejecting plans whose
