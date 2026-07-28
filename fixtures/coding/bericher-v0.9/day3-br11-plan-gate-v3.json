@@ -1,0 +1,31 @@
+{
+  "schema_version": "coding-eval-adjudication/v0.1",
+  "experiment_id": "tracelane-opencode-day3-v2-br11-plan-gate-v3",
+  "parent_adjudication": "tracelane-opencode-day3-v2-br11-adjudication-v4",
+  "status": "frozen-before-replay",
+  "trigger": {
+    "source_plan_run": "day3v2-br-11-dsv4pro-r2-plan-build-operator-restart-br11-v4",
+    "finding": "The frozen plan expressed complete BR-11 semantics in Chinese, but the v1 gate required English phrases and subprocess-specific implementation words.",
+    "v1_plan_score": 20,
+    "v3_plan_score": 100,
+    "operator_interrupted_next_attempt": "day3v2-br-11-k2.7code-r1-direct-build",
+    "next_attempt_model_tokens_observed": 655910,
+    "next_attempt_tool_calls_observed": 29
+  },
+  "policy": {
+    "frozen_v1_gate_output_preserved": true,
+    "source_plan_reused_without_rerun": true,
+    "source_plan_budget_charged": true,
+    "build_uses_only_remaining_budget": true,
+    "replay_layer": "gate-replay",
+    "automatic_retries": 0
+  },
+  "replay_attempt": "day3v2-br-11-dsv4pro-r2-plan-build-gate-replay-br11-plan-v3",
+  "replacement_next_attempt": "day3v2-br-11-k2.7code-r1-direct-build-operator-restart-br11-plan-gate-v3",
+  "frozen_inputs": {
+    "source_plan_sha256": "06f3d13c195ea69faad7007d4ac00eb8c91f5e0dd8c8f64c7436d040b92202a2",
+    "interrupted_next_cli_sha256": "5cff551e9a87981464834bce0766019127459da9a6971c41dc22892195e96df9",
+    "plan_gate_sha256": "96bfc1873271b4b1126d3bcf060876529d1821d79ab011d5f47a9926cc6abb10",
+    "resume_runner_sha256": "934266aeeda655878f4300b090c1f53ca18fe6eb6d75b86bd4bc27fd43c13399"
+  }
+}

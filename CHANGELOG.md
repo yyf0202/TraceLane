@@ -30,6 +30,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   independent controls, NAV, and email-count slices.
 - BR-11 v4 decouples discovery-prefix correctness from pipeline ordering, isolation,
   independent controls, and email-count scoring.
+- BR-11 plan gate v3 accepts equivalent Chinese semantics and direct helper APIs,
+  preserves contradiction checks, and replays a frozen plan using only its remaining
+  build budget in a separate gate-replay layer.
 - OpenCode H0 freezes the complete buildable fork source, archive, binary, execution
   isolation, and future Meta-Harness candidate boundary.
 - BR-10–12 semantic plan gates accept equivalent designs while rejecting plans whose

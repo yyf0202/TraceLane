@@ -6,6 +6,10 @@ import sys
 from pathlib import Path
 
 GATE = Path(__file__).parent / "fixtures/coding_tasks/day3_plan_acceptance.py"
+GATE_V3 = (
+    Path(__file__).parent
+    / "fixtures/coding_tasks/day3_plan_acceptance_v3.py"
+)
 
 
 def _run(tmp_path: Path, task: str, content: str) -> subprocess.CompletedProcess[str]:
@@ -13,6 +17,19 @@ def _run(tmp_path: Path, task: str, content: str) -> subprocess.CompletedProcess
     plan.write_text(json.dumps({"content": content}), encoding="utf-8")
     return subprocess.run(
         [sys.executable, str(GATE), str(plan), task],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_v3(
+    tmp_path: Path, task: str, content: str
+) -> subprocess.CompletedProcess[str]:
+    plan = tmp_path / "plan-v3.json"
+    plan.write_text(json.dumps({"content": content}), encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(GATE_V3), str(plan), task],
         capture_output=True,
         text=True,
         check=False,
@@ -85,3 +102,32 @@ def test_gates_reject_correct_words_with_wrong_semantics(tmp_path: Path) -> None
     for task, content in wrong.items():
         result = _run(tmp_path, task, content)
         assert result.returncode == 1, (task, result.stdout)
+
+
+def test_br11_v3_accepts_complete_chinese_semantics(tmp_path: Path) -> None:
+    content = """
+    扫描 sim_REAL_* 目录，且必须同时存在 config.json 和
+    state_portfolio.json。预 daily_run 对每个 sim 查找 filled CSV 并调用
+    sync_fills；用 try/except 将失败限制在单个 sim，继续处理其他 sim。
+    daily_run 成功后，从交易日历 cal_date 解析下一交易日；不可用时回退到
+    工作日递增并跳过周六周日，再调用 generate_order_list 生成下单清单。
+    当前 NAV 使用现金 cash 加持仓 position 的 last_trade_price 市值。
+    增加 --skip-real-sync 和 --skip-real-orders 两个独立开关，并把订单数量
+    写入邮件主题。
+    """
+    result = _run_v3(tmp_path, "BR-11", content)
+    assert result.returncode == 0, result.stdout
+
+
+def test_br11_v3_rejects_chinese_plan_with_wrong_order(tmp_path: Path) -> None:
+    content = """
+    扫描 sim_REAL_* 目录并检查 config.json 和 state_portfolio.json。
+    在 daily_run 之前，对每个 sim 使用 try/except 隔离失败并调用
+    sync_fills 处理 filled CSV。
+    从交易日历 cal_date 获取下一交易日，失败时回退到工作日递增。
+    使用现金和持仓的 last_trade_price 计算 NAV，提供 --skip-real-sync 与
+    --skip-real-orders，将订单数量放入邮件主题；但在 daily_run 之前生成
+    generate_order_list 下单清单。
+    """
+    result = _run_v3(tmp_path, "BR-11", content)
+    assert result.returncode == 1
