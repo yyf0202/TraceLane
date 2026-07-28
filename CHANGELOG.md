@@ -13,6 +13,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   two workflows, and two alternating-order repeats.
 - Day 3 v2 preserves and excludes an infrastructure pilot, makes isolated configuration
   phase-safe, and records operator interruption without leaving an OpenCode child process.
+- Day 3 keeps the frozen BR-10 gate and grader outputs while adding versioned v2
+  adjudication for equivalent `A/C/M` plan notation, arbitrary oversize-state names, and
+  equivalent Windows file-size checks after observed v1 false negatives.
+- A Day 3 recovery amendment preserves the zero-token operator interruption, replaces only
+  that Kimi slot with a new ID, and keeps corrected-gate builds in a separate replay layer.
 - OpenCode H0 freezes the complete buildable fork source, archive, binary, execution
   isolation, and future Meta-Harness candidate boundary.
 - BR-10–12 semantic plan gates accept equivalent designs while rejecting plans whose
