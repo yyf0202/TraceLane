@@ -20,6 +20,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   that Kimi slot with a new ID, and keeps corrected-gate builds in a separate replay layer.
 - BR-10 v3 adjudication accepts equivalent helper-based push and size-gate decomposition
   while preserving the frozen v1/v2 outputs and replacing the diagnosis-interrupted slot.
+- BR-10 v4 replaces shape-specific shell grading with isolated local-Git behavioral
+  scenarios while retaining a structural Windows batch slice.
 - OpenCode H0 freezes the complete buildable fork source, archive, binary, execution
   isolation, and future Meta-Harness candidate boundary.
 - BR-10–12 semantic plan gates accept equivalent designs while rejecting plans whose
