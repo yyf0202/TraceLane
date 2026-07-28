@@ -76,6 +76,10 @@ def main() -> int:
     run_day2.add_argument("--only")
     run_day2.add_argument("--dry-run", action="store_true")
 
+    run_day3 = subparsers.add_parser("run-day3")
+    run_day3.add_argument("--only")
+    run_day3.add_argument("--dry-run", action="store_true")
+
     run_recovery = subparsers.add_parser("run-recovery")
     run_recovery.add_argument("--suffix", required=True)
     run_recovery.add_argument(
@@ -86,6 +90,7 @@ def main() -> int:
     run_recovery.add_argument("--dry-run", action="store_true")
 
     subparsers.add_parser("import-day2")
+    subparsers.add_parser("import-day3")
 
     import_recovery = subparsers.add_parser("import-recovery")
     import_recovery.add_argument("--suffix", required=True)
@@ -96,6 +101,7 @@ def main() -> int:
     validate.add_argument("--results", action="append", type=Path, required=True)
 
     subparsers.add_parser("report-day2")
+    subparsers.add_parser("report-day3")
     args = parser.parse_args()
 
     if args.command == "preflight":
@@ -110,6 +116,11 @@ def main() -> int:
         if args.only:
             forwarded.extend(("--only", args.only))
         return _run("run_day2_coding_eval.py", forwarded)
+    if args.command == "run-day3":
+        forwarded = ["--dry-run"] if args.dry_run else []
+        if args.only:
+            forwarded.extend(("--only", args.only))
+        return _run("run_day3_coding_eval.py", forwarded)
     if args.command == "run-recovery":
         forwarded = [
             "--phase",
@@ -122,6 +133,8 @@ def main() -> int:
         return _run("run_day2_recovery.py", forwarded)
     if args.command == "import-day2":
         return _run("import_day2_coding_eval.py", [])
+    if args.command == "import-day3":
+        return _run("import_day3_coding_eval.py", [])
     if args.command == "import-recovery":
         forwarded = [
             "--recovery-suffix",
@@ -138,6 +151,8 @@ def main() -> int:
         return 0
     if args.command == "report-day2":
         return _run("summarize_day2_layers.py", [])
+    if args.command == "report-day3":
+        return _run("summarize_day3_coding_eval.py", [])
     raise AssertionError(args.command)
 
 

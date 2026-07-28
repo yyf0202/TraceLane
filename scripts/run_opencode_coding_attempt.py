@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -36,6 +37,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--max-tool-calls", type=int, required=True)
     parser.add_argument("--max-model-tokens", type=int, required=True)
     parser.add_argument("--provider-turn-timeout-seconds", type=int, default=300)
+    parser.add_argument("--harness-manifest", type=Path)
     return parser.parse_args()
 
 
@@ -190,6 +192,14 @@ def _budget_observation(
     }
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def main() -> int:
     args = _arguments()
     if (
@@ -204,6 +214,18 @@ def main() -> int:
         raise ValueError("budgets and provider turn timeout must be positive")
     if not args.binary.is_file() or not args.worktree.is_dir():
         raise ValueError("binary and worktree must exist")
+    harness: dict[str, str] | None = None
+    if args.harness_manifest is not None:
+        manifest_path = args.harness_manifest.resolve()
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        harness_id = manifest.get("harness_id")
+        if not isinstance(harness_id, str) or not harness_id:
+            raise ValueError("harness manifest has no harness_id")
+        harness = {
+            "harness_id": harness_id,
+            "manifest_sha256": _sha256(manifest_path),
+            "binary_sha256": _sha256(args.binary),
+        }
     message = (
         args.prompt_file.read_text(encoding="utf-8")
         if args.prompt_file is not None
@@ -247,6 +269,12 @@ def main() -> int:
     provider_config = _provider_config(args)
     if provider_config is not None:
         environment["OPENCODE_CONFIG_CONTENT"] = provider_config
+    isolated_config = args.raw_directory / ".xdg-config"
+    isolated_config.mkdir()
+    environment["XDG_CONFIG_HOME"] = str(isolated_config.resolve())
+    environment["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
+    environment["OPENCODE_DISABLE_EXTERNAL_SKILLS"] = "1"
+    environment["OPENCODE_DISABLE_CLAUDE_CODE"] = "1"
     environment["OPENCODE_TRACELANE_DIR"] = str(args.raw_directory.resolve())
     environment["OPENCODE_TRACELANE_TURN_TIMEOUT_MS"] = str(
         args.provider_turn_timeout_seconds * 1_000
@@ -326,6 +354,7 @@ def main() -> int:
         },
         "usage": metrics,
         "budget_observation": _budget_observation(args, metrics, elapsed_ms),
+        "harness": harness,
     }
     result_path.write_text(canonical_json(result) + "\n", encoding="utf-8")
     print(canonical_json(result))

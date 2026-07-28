@@ -236,6 +236,11 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
     }
     wall_ms = sum(int(value["wall_ms"]) for value in executions)
     amount_usd = round(sum(float(row["amount_usd"]) for row in cli_rows), 8)
+    harnesses = [value.get("harness") for value in executions]
+    observed_harnesses = [value for value in harnesses if isinstance(value, dict)]
+    if observed_harnesses and any(value != observed_harnesses[0] for value in observed_harnesses):
+        raise ValueError(f"{spec.run_slug} changed harness between phases")
+    harness = observed_harnesses[0] if observed_harnesses else None
     plan_path = raw / "handoff/plan.json"
     plan_artifact = (
         load_plan_artifact(json.loads(plan_path.read_text(encoding="utf-8")))
@@ -270,6 +275,7 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
             "workflow": spec.workflow,
             "provider": "ark",
             "model": spec.model,
+            "harness": harness,
             "observer_revision": "06d9803be9",
             "execution_mode": "strictly-serial-paired-matrix",
             "automatic_attempt_retries": 0,
@@ -309,8 +315,10 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
             adjudicated_plan_score,
         )
     trace_bytes = sum((raw / f"{row['session_id']}.jsonl").stat().st_size for row in cli_rows)
-    provider_rejected = any(
-        phase["state"] == "provider_rejected_before_stream" for phase in diagnoses
+    provider_transport_valid = all(
+        phase.get("local_termination")
+        or phase["state"] in {"completed", "model_completed_processor_incomplete"}
+        for phase in diagnoses
     )
     analysis_score = adjudicated_score or score
     return {
@@ -342,7 +350,7 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
         ),
         "analysis_functional_score": analysis_score["earned"],
         "analysis_functional_possible": analysis_score["possible"],
-        "capability_analysis_eligible": not provider_rejected,
+        "capability_analysis_eligible": provider_transport_valid,
         "overall": finalized.grades.overall,
         "acceptance": finalized.grades.acceptance.status,
         "diff": finalized.grades.diff.status,
@@ -353,6 +361,7 @@ def _import(spec: experiment.AttemptSpec) -> dict[str, object]:
         "cost_usd": amount_usd,
         "raw_trace_bytes": trace_bytes,
         "provider_turns": diagnoses,
+        "harness": harness,
     }
 
 

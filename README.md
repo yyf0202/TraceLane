@@ -86,10 +86,12 @@ BR-07 随后用新 ID 再做一次恢复，6 条均获得稳定响应。三个�
 
 ## 接下来
 
-BR-10–12 已冻结为下一组复杂任务，覆盖跨平台提交状态、实盘调度时序和训练
-checkpoint 状态。它们尚未运行，不属于上面的结果。
+BR-10–12 已冻结为 Day 3 复杂任务，覆盖跨平台提交状态、实盘调度时序和训练
+checkpoint 状态。预注册矩阵包含三个模型、两种 workflow 和两次重复，共 36 条；
+它们尚未计入上面的结果。
 
 [任务集](docs/experiments/bericher-v0.9-taskset.md) ·
+[Day 3 预注册](docs/experiments/2026-07-28-day3-preregistration.md) ·
 [Meta-Harness 就绪性](docs/experiments/2026-07-28-meta-harness-readiness.md)
 
 实验统一从 `scripts/coding_eval.py` 进入。正式运行前会串行检查所有 provider；

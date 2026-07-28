@@ -50,6 +50,8 @@ class AttemptSpec:
     repeat: int
     workflow: str
     run_suffix: str = ""
+    experiment_day: str = "day2"
+    harness_manifest: Path | None = None
 
     @property
     def model_slug(self) -> str:
@@ -63,7 +65,7 @@ class AttemptSpec:
     def run_slug(self) -> str:
         version = f"-{self.task.run_version}" if self.task.run_version else ""
         base = (
-            f"day2-{self.task.short_id.lower()}{version}-"
+            f"{self.experiment_day}-{self.task.short_id.lower()}{version}-"
             f"{self.model_slug}-r{self.repeat}-{self.workflow}"
         )
         return f"{base}-{self.run_suffix}" if self.run_suffix else base
@@ -206,6 +208,8 @@ def _runner_command(
     else:
         assert prompt is not None
         command.extend(("--prompt", prompt))
+    if spec.harness_manifest is not None:
+        command.extend(("--harness-manifest", str(spec.harness_manifest)))
     return command
 
 

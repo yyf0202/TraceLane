@@ -1,0 +1,48 @@
+{
+  "schema_version": "coding-harness-baseline/v0.1",
+  "harness_id": "opencode-h0-06d9803be9",
+  "source": {
+    "repository": "https://github.com/yyf0202/opencode.git",
+    "branch": "tracelane-observer",
+    "commit_sha": "06d9803be9f7ef243aead06025f2b4d8b720cfaa",
+    "tree_sha": "161a83a93df633b420a404feff6106968bc3428f",
+    "git_archive_sha256": "910d225d8c7864184b300fef21efe8fe788a93b4bda71ebfc6de90959c4bcdb3"
+  },
+  "binary": {
+    "platform": "darwin-arm64",
+    "relative_path": "packages/opencode/dist/opencode-darwin-arm64/bin/opencode",
+    "sha256": "fde9e2324ff9eace812359f43751923f944133e6e0a9bbd6544cbea31bf28877"
+  },
+  "execution": {
+    "cli": "opencode run --pure --auto --format json",
+    "agents": [
+      "build",
+      "plan"
+    ],
+    "plan_build_phase_link": "manual-cli-split",
+    "automatic_provider_turn_retries": 0,
+    "provider_turn_watchdog_seconds": 300,
+    "isolated_config_home": true,
+    "project_config": false,
+    "external_plugins": false,
+    "external_skills": false
+  },
+  "candidate_scope": {
+    "editable_paths": [
+      "packages/opencode/src/agent/**",
+      "packages/opencode/src/session/**",
+      "packages/opencode/src/tool/**",
+      "packages/opencode/src/permission/**",
+      "packages/opencode/src/cli/cmd/run/**"
+    ],
+    "protected_paths": [
+      "packages/opencode/src/tracelane/**",
+      "packages/opencode/src/plugin/tracelane.ts",
+      "packages/opencode/src/provider/**",
+      "packages/opencode/src/auth/**",
+      "packages/opencode/src/config/**",
+      "packages/opencode/test/**"
+    ]
+  },
+  "notes": "H0 is the complete buildable OpenCode fork revision. Meta-Harness candidates are full detached worktrees derived from this commit; only the declared harness surfaces may change. Observation, provider, credential, task, grader, and budget code remain outside the candidate search space."
+}

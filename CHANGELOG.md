@@ -9,6 +9,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Day 3 preregisters 36 strictly serial BR-10–12 attempts across three Ark models,
+  two workflows, and two alternating-order repeats.
+- OpenCode H0 freezes the complete buildable fork source, archive, binary, execution
+  isolation, and future Meta-Harness candidate boundary.
+- BR-10–12 semantic plan gates accept equivalent designs while rejecting plans whose
+  pseudocode contradicts their stated state or timing semantics.
 - A unified coding-evaluation entry point now runs provider preflights, Day 2 cohorts,
   recovery and replay cohorts, imports, result validation, and layered reporting.
 - Serial health preflights cover every configured Ark and OpenCode Go provider without
