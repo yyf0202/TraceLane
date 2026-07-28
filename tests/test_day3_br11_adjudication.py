@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 V2 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v2.py"
 V3 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v3.py"
+V4 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v4.py"
 AMENDMENT = (
     ROOT
     / "fixtures/coding/bericher-v0.9/day3-br11-disconnect-recovery.json"
@@ -19,6 +20,7 @@ GRADER_PYTHON = Path(
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import resume_day3_after_br11_v3 as v3_recovery  # noqa: E402
+import resume_day3_after_br11_v4 as v4_recovery  # noqa: E402
 import resume_day3_after_disconnect as recovery  # noqa: E402
 import run_day3_coding_eval as day3  # noqa: E402
 
@@ -206,6 +208,16 @@ def _run_v3(repository: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_v4(repository: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(GRADER_PYTHON), str(V4), str(repository)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
 def _score(result: subprocess.CompletedProcess[str]) -> int:
     line = next(
         line for line in result.stdout.splitlines() if line.startswith("TRACELANE_SCORE=")
@@ -263,6 +275,30 @@ def test_br11_v3_rejects_shared_real_trading_skip_switch(
     assert _score(result) == 60
 
 
+def test_br11_v4_keeps_pipeline_slice_independent(tmp_path: Path) -> None:
+    _write_candidate(tmp_path)
+    result = _run_v4(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert _score(result) == 100
+
+
+def test_br11_v4_still_rejects_shared_skip_switch(tmp_path: Path) -> None:
+    _write_candidate(tmp_path)
+    scheduler = tmp_path / "scripts/scheduled_daily_run.py"
+    source = scheduler.read_text(encoding="utf-8")
+    source = source.replace("--skip-real-sync", "--skip-real-trading")
+    source = source.replace(
+        '    parser.add_argument("--skip-real-orders", action="store_true")\n',
+        "",
+    )
+    source = source.replace("args.skip_real_sync", "args.skip_real_trading")
+    source = source.replace("args.skip_real_orders", "args.skip_real_trading")
+    scheduler.write_text(source, encoding="utf-8")
+    result = _run_v4(tmp_path)
+    assert result.returncode == 1
+    assert _score(result) == 60
+
+
 def test_disconnect_resume_starts_after_completed_replacement() -> None:
     original = day3.matrix()
     interrupted_index = next(
@@ -308,4 +344,31 @@ def test_br11_v3_amendment_hashes() -> None:
     assert _sha256(V3) == frozen["functional_adjudicator_sha256"]
     assert _sha256(
         ROOT / "scripts/resume_day3_after_br11_v3.py"
+    ) == frozen["resume_runner_sha256"]
+
+
+def test_br11_v4_resume_replaces_only_interrupted_r2_plan() -> None:
+    original = day3.matrix()
+    index = next(
+        index
+        for index, row in enumerate(original)
+        if row.run_slug == v4_recovery.INTERRUPTED
+    )
+    remaining = v4_recovery.remaining_matrix()
+    assert remaining[0].run_slug == (
+        v4_recovery.INTERRUPTED + "-" + v4_recovery.RESTART_SUFFIX
+    )
+    assert remaining[1:] == original[index + 1 :]
+
+
+def test_br11_v4_amendment_hashes() -> None:
+    amendment = (
+        ROOT
+        / "fixtures/coding/bericher-v0.9/day3-br11-adjudication-v4.json"
+    )
+    value = json.loads(amendment.read_text(encoding="utf-8"))
+    frozen = value["frozen_inputs"]
+    assert _sha256(V4) == frozen["functional_adjudicator_sha256"]
+    assert _sha256(
+        ROOT / "scripts/resume_day3_after_br11_v4.py"
     ) == frozen["resume_runner_sha256"]

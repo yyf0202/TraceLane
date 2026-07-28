@@ -28,6 +28,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - BR-11 v3 removes prescribed helper names from adjudication, discovers implementation
   roles from the call graph, and executes ordering, isolation, runtime compatibility,
   independent controls, NAV, and email-count slices.
+- BR-11 v4 decouples discovery-prefix correctness from pipeline ordering, isolation,
+  independent controls, and email-count scoring.
 - OpenCode H0 freezes the complete buildable fork source, archive, binary, execution
   isolation, and future Meta-Harness candidate boundary.
 - BR-10–12 semantic plan gates accept equivalent designs while rejecting plans whose

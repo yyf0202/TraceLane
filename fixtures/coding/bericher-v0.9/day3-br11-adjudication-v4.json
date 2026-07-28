@@ -1,0 +1,32 @@
+{
+  "schema_version": "coding-eval-adjudication/v0.1",
+  "experiment_id": "tracelane-opencode-day3-v2-br11-adjudication-v4",
+  "parent_adjudication": "tracelane-opencode-day3-v2-br11-adjudication-v3",
+  "status": "frozen-before-resume",
+  "trigger": {
+    "finding": "BR-11 v3 reused strict discovery-role resolution inside the pipeline criterion, allowing a discovery-prefix failure to zero an otherwise independent pipeline slice.",
+    "operator_interrupted_attempt": "day3v2-br-11-dsv4pro-r2-plan-build",
+    "model_tokens_observed": 203572,
+    "tool_calls_observed": 12
+  },
+  "policy": {
+    "frozen_v1_through_v3_outputs_preserved": true,
+    "v4_discovery_score_remains_strict": true,
+    "v4_pipeline_score_is_independent_of_discovery": true,
+    "automatic_retries": 0
+  },
+  "observed_adjudication": {
+    "run_id": "day3v2-br-11-dsv4pro-r2-direct-build-operator-restart-br11-v3",
+    "v3_score": 30,
+    "v4_score": 70,
+    "discovery_failure": "startswith sim_REAL accepts names outside the frozen sim_REAL_ namespace",
+    "sync_failure": "Path | None cannot import under Python 3.9",
+    "pipeline_slice": "passes independently"
+  },
+  "replacement_attempt": "day3v2-br-11-dsv4pro-r2-plan-build-operator-restart-br11-v4",
+  "frozen_inputs": {
+    "interrupted_plan_cli_sha256": "7a446f6aac18d607968979823722131930cd6187203d11fb364ee055dd931db4",
+    "functional_adjudicator_sha256": "4c2b8e8be1b6c02f2ae95b4b0d9d751f487a051621b7c819127912fc41214096",
+    "resume_runner_sha256": "955a8f7eff7d65fefd0e7916843d6bc5052483dfb69d63e71fb83ee3c504a750"
+  }
+}
