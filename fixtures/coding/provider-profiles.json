@@ -1,0 +1,41 @@
+{
+  "schema_version": "coding-provider-profiles/v0.1",
+  "profiles": [
+    {
+      "profile_id": "ark-glm-5.2",
+      "provider_id": "ark",
+      "provider_name": "Ark Coding",
+      "model_id": "glm-5.2",
+      "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "keychain_service": "ark-coding-api-key",
+      "api_key_env": "ARK_API_KEY"
+    },
+    {
+      "profile_id": "ark-deepseek-v4-pro",
+      "provider_id": "ark",
+      "provider_name": "Ark Coding",
+      "model_id": "deepseek-v4-pro",
+      "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "keychain_service": "ark-coding-api-key",
+      "api_key_env": "ARK_API_KEY"
+    },
+    {
+      "profile_id": "ark-kimi-k2.7-code",
+      "provider_id": "ark",
+      "provider_name": "Ark Coding",
+      "model_id": "kimi-k2.7-code",
+      "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "keychain_service": "ark-coding-api-key",
+      "api_key_env": "ARK_API_KEY"
+    },
+    {
+      "profile_id": "opencode-go-glm-5.2",
+      "provider_id": "opencode-go",
+      "provider_name": "OpenCode Go",
+      "model_id": "glm-5.2",
+      "base_url": null,
+      "keychain_service": "opencode-go-api-key",
+      "api_key_env": "OPENCODE_API_KEY"
+    }
+  ]
+}

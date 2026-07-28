@@ -9,6 +9,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- A unified coding-evaluation entry point now runs provider preflights, Day 2 cohorts,
+  recovery and replay cohorts, imports, result validation, and layered reporting.
+- Serial health preflights cover every configured Ark and OpenCode Go provider without
+  retries or persisted credentials, distinguishing request, first-token, stream, processor,
+  and local-budget termination states.
+- Coding attempts now record wall-time, tool-call, and model-token budget overshoot instead
+  of collapsing an over-budget observation to the configured limit.
+- A layered Day 2 evidence inventory keeps the preregistered matrix, transport recovery,
+  corrected-gate replay, and stable BR-07 recovery separate.
+- The plan-gate contract requires semantic rather than keyword correctness, preserves old
+  results, and adds a v4 contradiction case for BR-08.
+- BeRicher v0.9 freezes BR-10 through BR-12 with historical baselines, editable and
+  protected paths, weighted hidden acceptance slices, and explicit budgets.
+- A Meta-Harness readiness audit separates a safe plumbing smoke test from a future
+  optimization experiment and defines the remaining held-out evidence requirements.
 - Persisted execution fingerprints bind every v0.2 run to its exact case, evidence, harness, runtime, grader set, code revision, and repeat.
 - Exact checksum closure detects missing, extra, duplicated, or substituted run files.
 - Bound acquisition reviews tie approval to the exact candidate record, curated bytes, source locator, and review metadata.

@@ -85,6 +85,13 @@ def test_runner_enforces_total_provider_token_budget(tmp_path: Path) -> None:
     )
     assert execution["reason"] == "token_budget_exhausted"
     assert execution["usage"]["model_tokens"] == 103
+    assert execution["budget_observation"]["model_tokens"] == {
+        "limit": 50,
+        "observed": 103,
+        "overshoot": 53,
+        "overshoot_ratio": 1.06,
+    }
+    assert execution["budget_observation"]["tool_calls"]["overshoot"] == 0
     assert execution["budgets"]["provider_turn_timeout_seconds"] == 300
     termination = json.loads(
         (tmp_path / "raw" / "cli.jsonl.termination.json").read_text(encoding="utf-8")
@@ -138,6 +145,7 @@ def test_runner_enforces_wall_budget(tmp_path: Path) -> None:
         (tmp_path / "raw" / "cli.jsonl.execution.json").read_text(encoding="utf-8")
     )
     assert execution["reason"] == "wall_budget_exhausted"
+    assert execution["budget_observation"]["wall_ms"]["overshoot"] >= 0
     termination = json.loads(
         (tmp_path / "raw" / "cli.jsonl.termination.json").read_text(encoding="utf-8")
     )

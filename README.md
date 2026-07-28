@@ -81,3 +81,16 @@ BR-07 随后用新 ID 再做一次恢复，6 条均获得稳定响应。三个�
 
 样本仍少，而且存在 provider 与 gate 缺失数据。目前只能描述这些 run，不能据此声称
 某种工作流或模型普遍更好。
+
+[Day 2 分层总表](docs/experiments/2026-07-28-day2-consolidated.md)
+
+## 接下来
+
+BR-10–12 已冻结为下一组复杂任务，覆盖跨平台提交状态、实盘调度时序和训练
+checkpoint 状态。它们尚未运行，不属于上面的结果。
+
+[任务集](docs/experiments/bericher-v0.9-taskset.md) ·
+[Meta-Harness 就绪性](docs/experiments/2026-07-28-meta-harness-readiness.md)
+
+实验统一从 `scripts/coding_eval.py` 进入。正式运行前会串行检查所有 provider；
+检查结果只用于判断请求链路是否健康，不计为 coding attempt。

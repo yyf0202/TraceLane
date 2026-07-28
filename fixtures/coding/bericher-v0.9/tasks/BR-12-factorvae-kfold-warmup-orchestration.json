@@ -1,0 +1,57 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-12-factorvae-kfold-warmup-orchestration",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "4d236860c08f46ba8bbf51ce4d97920a66d607ac",
+    "tree_sha256": "ba292cacae2c0eb77b81d669dd9d80206cbefc22aa9be46a2f23e7bc1d15444f"
+  },
+  "objective": "Restore FactorVAE KL annealing and prior warmup in the custom k-fold loop by advancing model epoch state before every training epoch. Add equivalent Windows and POSIX Phase 1 launchers for a full FactorVAE arm and an inert prior-only control arm, using the same frozen feature, fold, purge, date, batch, seed and model recipe on both platforms. A main-only switch must skip the control arm, and a failed main arm must prevent the control arm from starting.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile src/cli/kfold_train.py",
+      "bash -n scripts/train_factorvae_phase1.sh",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br12_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"82d615c0907857884d5968e515f5ac7cee8734d07d38fd14072591dcd0d8f5e5\" && /Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br12_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "src/cli/kfold_train.py",
+      "scripts/train_factorvae_phase1.sh",
+      "scripts/train_factorvae_phase1.bat"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**",
+      "outputs/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "bash",
+    "python3",
+    "rg",
+    "sed",
+    "/Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  }
+}

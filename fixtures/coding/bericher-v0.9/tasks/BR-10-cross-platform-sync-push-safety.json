@@ -1,0 +1,55 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-10-cross-platform-sync-push-safety",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "ab3ccc82b20918d2145b33206ad9ef430b617b35",
+    "tree_sha256": "53f5713c07ff49ed91a7354bccb256f94df9f06e511cd99391e4a28acfebd6c7"
+  },
+  "objective": "Make both sync_data implementations push existing ahead commits even when there are no new working-tree changes. Before committing or pushing the stock-data repository, inspect staged added/copied/modified files and abort that repository's push when any file exceeds 100 MiB, with Linux and macOS size detection in the shell path and equivalent behavior in the Windows batch path. Keep commit creation conditional, fix delayed DATESTR expansion in batch commit messages, and preserve the independent incremental and stock repository flows.",
+  "acceptance": {
+    "public_commands": [
+      "bash -n scripts/sync_data.sh",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br10_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"8f5f9cf5aef17fd591c729b2284dea6ffdd9ab6035a6d54eec69fd37c4e571a6\" && /Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br10_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "scripts/sync_data.sh",
+      "scripts/sync_data.bat"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**",
+      "outputs/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "bash",
+    "python3",
+    "rg",
+    "sed",
+    "/Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  }
+}

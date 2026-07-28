@@ -1,0 +1,12 @@
+{
+  "schema_version": "frozen-coding-suite/v0.1",
+  "suite_id": "bericher-v0.9",
+  "repository_id": "BeRicher_v0.45",
+  "tasks": [
+    "../bericher-v0.5/tasks/BR-09-v5-simulation-routing.json",
+    "tasks/BR-10-cross-platform-sync-push-safety.json",
+    "tasks/BR-11-scheduled-real-trading-orchestration.json",
+    "tasks/BR-12-factorvae-kfold-warmup-orchestration.json"
+  ],
+  "notes": "BR-10 through BR-12 add three non-invalid-data historical tasks. BR-11 and BR-12 require cross-component state or timing reasoning; all hidden graders use weighted functional slices rather than all-or-nothing acceptance."
+}

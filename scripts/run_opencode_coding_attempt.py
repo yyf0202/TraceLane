@@ -166,7 +166,28 @@ def _terminate(process: subprocess.Popen[bytes]) -> None:
         except (PermissionError, ProcessLookupError):
             if process.poll() is None:
                 process.kill()
-                process.wait()
+            process.wait()
+
+
+def _budget_observation(
+    args: argparse.Namespace,
+    metrics: dict[str, int],
+    elapsed_ms: int,
+) -> dict[str, dict[str, float | int]]:
+    values = {
+        "wall_ms": (args.max_wall_seconds * 1_000, elapsed_ms),
+        "tool_calls": (args.max_tool_calls, metrics["tool_calls"]),
+        "model_tokens": (args.max_model_tokens, metrics["model_tokens"]),
+    }
+    return {
+        name: {
+            "limit": limit,
+            "observed": observed,
+            "overshoot": max(0, observed - limit),
+            "overshoot_ratio": round(max(0, observed - limit) / limit, 8),
+        }
+        for name, (limit, observed) in values.items()
+    }
 
 
 def main() -> int:
@@ -304,6 +325,7 @@ def main() -> int:
             "provider_turn_retries": 0,
         },
         "usage": metrics,
+        "budget_observation": _budget_observation(args, metrics, elapsed_ms),
     }
     result_path.write_text(canonical_json(result) + "\n", encoding="utf-8")
     print(canonical_json(result))

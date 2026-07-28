@@ -1,0 +1,55 @@
+{
+  "schema_version": "coding-task/v0.1",
+  "task_id": "BR-11-scheduled-real-trading-orchestration",
+  "version": 1,
+  "baseline": {
+    "repository_id": "BeRicher_v0.45",
+    "commit_sha": "e8ca57ae852a89fef1f8d23b03dfe28856d6409b",
+    "tree_sha256": "6e0afa3cc39add8d12a53aa3e3d72d194346f1ade513426807b1501f992c30a6"
+  },
+  "objective": "Integrate real-trading state transitions into the scheduled daily workflow without breaking ordinary simulations. Discover only qualified sim_REAL directories, synchronize matching filled-order CSVs before daily_run, resolve the next trading day from the calendar with a safe fallback, and generate each real simulation's next-day order list from its current cash plus marked position value only after daily_run succeeds. Isolate per-simulation subprocess and state-read failures, add independent skip flags, and include the generated order-list count in the email subject. The scheduler may adapt the existing real-trading helper scripts if interface changes are required.",
+  "acceptance": {
+    "public_commands": [
+      "python3 -m py_compile scripts/scheduled_daily_run.py scripts/real_trading/sync_real_fills.py scripts/real_trading/generate_order_list.py",
+      "git diff --check"
+    ],
+    "hidden_commands": [
+      "test \"$(shasum -a 256 \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br11_hidden_acceptance.py\" | cut -d ' ' -f 1)\" = \"9417a2eb956b37b29b0a626b0bba33e1cb47f105db195e48b637e5eedfbd83d0\" && /Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python \"$TRACELANE_ROOT/tests/fixtures/coding_tasks/br11_hidden_acceptance.py\" ."
+    ]
+  },
+  "diff_policy": {
+    "editable_paths": [
+      "scripts/scheduled_daily_run.py",
+      "scripts/real_trading/sync_real_fills.py",
+      "scripts/real_trading/generate_order_list.py"
+    ],
+    "protected_paths": [
+      ".env",
+      "data/**",
+      "saved_models/**",
+      "paper_trading_data/**",
+      "outputs/**"
+    ],
+    "ignored_paths": [
+      "opencode.json",
+      "*.jsonl",
+      "traces/**"
+    ]
+  },
+  "interaction": {
+    "mode": "scripted_optional",
+    "requires_approval": false
+  },
+  "allowed_commands": [
+    "git",
+    "python3",
+    "rg",
+    "sed",
+    "/Users/efunyang/Desktop/BeRicher_v0.45/.venv/bin/python"
+  ],
+  "budget": {
+    "max_wall_seconds": 1800,
+    "max_tool_calls": 220,
+    "max_model_tokens": 2000000
+  }
+}
