@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 V2 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v2.py"
 V3 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v3.py"
 V4 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v4.py"
+V5 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v5.py"
 AMENDMENT = (
     ROOT
     / "fixtures/coding/bericher-v0.9/day3-br11-disconnect-recovery.json"
@@ -216,6 +217,33 @@ def _run_v4(repository: Path) -> subprocess.CompletedProcess[str]:
         check=False,
         timeout=30,
     )
+
+
+def _run_v5(repository: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(GRADER_PYTHON), str(V5), str(repository)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+def test_br11_v5_contains_argparse_system_exit_per_slice(
+    monkeypatch,
+    capsys,
+) -> None:
+    sys.path.insert(0, str(V5.parent))
+    import br11_hidden_acceptance_v5 as v5
+
+    checks = [
+        ("argparse_candidate", 40, lambda: (_ for _ in ()).throw(SystemExit(2))),
+        ("independent_slice", 60, lambda: None),
+    ]
+    assert v5._contained_score("BR-11", checks) == 1
+    output = capsys.readouterr().out
+    assert '"earned": 60' in output
+    assert "SystemExit: 2" in output
 
 
 def _score(result: subprocess.CompletedProcess[str]) -> int:

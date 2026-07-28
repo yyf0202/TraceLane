@@ -1,0 +1,13 @@
+{
+  "schema_version": "coding-eval-adjudication-amendment/v0.1",
+  "task_id": "BR-11",
+  "supersedes_for_adjudication_only": "br11_hidden_acceptance_v4.py",
+  "frozen_primary_grader_unchanged": true,
+  "reason": "V4 allowed argparse SystemExit from one candidate-facing slice to abort the entire grader instead of recording an isolated zero.",
+  "replacement_grader": "tests/fixtures/coding_tasks/br11_hidden_acceptance_v5.py",
+  "counterexample": "A candidate scheduler whose CLI parser exits during a behavioral slice must receive zero for that slice while independent slices still execute.",
+  "affected_gate_replay": "day3v2-br-11-dsv4pro-r2-plan-build-gate-replay-br11-plan-v3",
+  "interrupted_attempt": "day3v2-br-11-k2.7code-r1-direct-build-operator-restart-br11-plan-gate-v3",
+  "replacement_attempt_suffix": "operator-restart-br11-grader-v5",
+  "automatic_retry_count": 0
+}
