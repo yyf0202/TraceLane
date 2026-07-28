@@ -1,0 +1,46 @@
+{
+  "schema_version": "coding-eval-recovery/v0.1",
+  "frozen_at": "2026-07-28",
+  "parent_cohort": "day2-recovery1",
+  "purpose": "Retry the three BR-07 v2 pairs whose recovery1 attempts ended in Ark transport failures.",
+  "execution_rules": {
+    "serial": true,
+    "automatic_retries": false,
+    "preserve_parent_attempts": true,
+    "same_provider_within_pair": true,
+    "provider": "ark",
+    "endpoint": "https://ark.cn-beijing.volces.com/api/coding/v3",
+    "task": "BR-07-factorvae-crash-resilience-v2"
+  },
+  "pairs": [
+    {
+      "model": "kimi-k2.7-code",
+      "repeat": 2,
+      "order": ["plan-build", "direct-build"],
+      "attempt_ids": [
+        "day2-br-07-v2-k2.7code-r2-plan-build-recovery2",
+        "day2-br-07-v2-k2.7code-r2-direct-build-recovery2"
+      ]
+    },
+    {
+      "model": "glm-5.2",
+      "repeat": 1,
+      "order": ["plan-build", "direct-build"],
+      "attempt_ids": [
+        "day2-br-07-v2-glm52-r1-plan-build-recovery2",
+        "day2-br-07-v2-glm52-r1-direct-build-recovery2"
+      ]
+    },
+    {
+      "model": "glm-5.2",
+      "repeat": 2,
+      "order": ["direct-build", "plan-build"],
+      "attempt_ids": [
+        "day2-br-07-v2-glm52-r2-direct-build-recovery2",
+        "day2-br-07-v2-glm52-r2-plan-build-recovery2"
+      ]
+    }
+  ],
+  "budget_policy": "Each attempt receives the unchanged frozen BR-07 v2 budget: 1800 seconds, 220 tool calls, and 2000000 model tokens. Plan and build share the total.",
+  "claim_scope": "Descriptive paired evidence only; no statistical-significance claim."
+}

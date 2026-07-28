@@ -25,6 +25,15 @@ def test_recovery_matrix_is_frozen_and_unique() -> None:
     assert len({row.run_slug for row in rows}) == 6
 
 
+def test_recovery_matrix_accepts_a_new_preserved_cohort_suffix() -> None:
+    rows = recovery.recovery_matrix("recovery2")
+    assert len(rows) == 6
+    assert all(row.run_slug.endswith("-recovery2") for row in rows)
+    assert not {row.run_slug for row in rows} & {
+        row.run_slug for row in recovery.recovery_matrix()
+    }
+
+
 def test_gate_replays_point_to_six_original_plan_attempts() -> None:
     rows = recovery.replay_matrix()
     assert len({row.run_spec.run_slug for row in rows}) == 6

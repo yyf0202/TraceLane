@@ -73,5 +73,11 @@ token 上限。BR-08 的 5 个可对照 replay 中，plan 赢 1、平 3、输 1�
 
 [完整记录](docs/experiments/2026-07-28-day2-recovery.md)
 
+BR-07 随后用新 ID 再做一次恢复，6 条均获得稳定响应。三个配对中 plan→build
+得到 60、60、30 分，direct-build 均为 60 分；plan 0 胜、2 平、1 负，平均差
+-10 分。所有 attempt 都在约 2M token 时终止。
+
+[BR-07 recovery2](docs/experiments/2026-07-28-day2-recovery2.md)
+
 样本仍少，而且存在 provider 与 gate 缺失数据。目前只能描述这些 run，不能据此声称
 某种工作流或模型普遍更好。

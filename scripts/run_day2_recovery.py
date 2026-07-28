@@ -34,26 +34,26 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def recovery_matrix() -> list[experiment.AttemptSpec]:
+def recovery_matrix(run_suffix: str = "recovery1") -> list[experiment.AttemptSpec]:
     return [
         experiment.AttemptSpec(
             BR07_V2,
             "kimi-k2.7-code",
             2,
             "plan-build",
-            "recovery1",
+            run_suffix,
         ),
         experiment.AttemptSpec(
             BR07_V2,
             "kimi-k2.7-code",
             2,
             "direct-build",
-            "recovery1",
+            run_suffix,
         ),
-        experiment.AttemptSpec(BR07_V2, "glm-5.2", 1, "plan-build", "recovery1"),
-        experiment.AttemptSpec(BR07_V2, "glm-5.2", 1, "direct-build", "recovery1"),
-        experiment.AttemptSpec(BR07_V2, "glm-5.2", 2, "direct-build", "recovery1"),
-        experiment.AttemptSpec(BR07_V2, "glm-5.2", 2, "plan-build", "recovery1"),
+        experiment.AttemptSpec(BR07_V2, "glm-5.2", 1, "plan-build", run_suffix),
+        experiment.AttemptSpec(BR07_V2, "glm-5.2", 1, "direct-build", run_suffix),
+        experiment.AttemptSpec(BR07_V2, "glm-5.2", 2, "direct-build", run_suffix),
+        experiment.AttemptSpec(BR07_V2, "glm-5.2", 2, "plan-build", run_suffix),
     ]
 
 
@@ -184,9 +184,14 @@ def _replay(spec: ReplaySpec) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase", choices=("recovery", "replay", "all"), default="all")
+    parser.add_argument("--recovery-suffix", default="recovery1")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    recoveries = recovery_matrix() if args.phase in {"recovery", "all"} else []
+    recoveries = (
+        recovery_matrix(args.recovery_suffix)
+        if args.phase in {"recovery", "all"}
+        else []
+    )
     replays = replay_matrix() if args.phase in {"replay", "all"} else []
     if args.dry_run:
         for spec in recoveries:

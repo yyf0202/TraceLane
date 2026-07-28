@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -270,20 +271,45 @@ def _import_replay(spec: recovery.ReplaySpec) -> dict[str, object]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--recovery-suffix", default="recovery1")
+    parser.add_argument("--artifact-directory", default="day2-recovery")
+    parser.add_argument("--recovery-only", action="store_true")
+    args = parser.parse_args()
+    global ARTIFACT_ROOT, RESULTS
+    ARTIFACT_ROOT = ROOT / "artifacts" / args.artifact_directory
+    RESULTS = ARTIFACT_ROOT / "results.json"
     os.environ["TRACELANE_ROOT"] = str(ROOT)
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
     day2_import.ARTIFACT_ROOT = ARTIFACT_ROOT
-    recoveries = [_import_recovery(spec) for spec in recovery.recovery_matrix()]
-    replays = [_import_replay(spec) for spec in recovery.replay_matrix()]
-    result = {
-        "schema_version": "coding-eval-day2-recovery/v0.1",
-        "experiment": "TraceLane x OpenCode Day 2 recovery and gate replay",
-        "provider": "ark",
-        "claim_scope": (
+    recoveries = [
+        _import_recovery(spec)
+        for spec in recovery.recovery_matrix(args.recovery_suffix)
+    ]
+    replays = (
+        [] if args.recovery_only else [_import_replay(spec) for spec in recovery.replay_matrix()]
+    )
+    experiment_name = (
+        f"TraceLane x OpenCode Day 2 {args.recovery_suffix} cohort"
+        if args.recovery_only
+        else "TraceLane x OpenCode Day 2 recovery and gate replay"
+    )
+    claim_scope = (
+        "One strictly serial BR-07 v2 recovery cohort with three matched pairs; "
+        "descriptive evidence only and no statistical-significance claim."
+        if args.recovery_only
+        else (
             "Three separate descriptive layers: the original preregistered 36 remain "
             "unchanged; infrastructure-failed recovery pairs are not capability evidence; "
             "gate replays diagnose corrected-gate build outcomes. No significance claim."
-        ),
+        )
+    )
+    result = {
+        "schema_version": "coding-eval-day2-recovery/v0.1",
+        "experiment": experiment_name,
+        "recovery_suffix": args.recovery_suffix,
+        "provider": "ark",
+        "claim_scope": claim_scope,
         "layers": {
             "original_preregistered_36": {
                 "results": "../day2-coding-eval/results.json",
