@@ -22,6 +22,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   while preserving the frozen v1/v2 outputs and replacing the diagnosis-interrupted slot.
 - BR-10 v4 replaces shape-specific shell grading with isolated local-Git behavioral
   scenarios while retaining a structural Windows batch slice.
+- BR-11 disconnect recovery preserves a terminal build without rerunning it, reconstructs
+  the missing budget record from immutable CLI evidence, and adds a Python 3.9 behavioral
+  adjudicator that separates a working NAV slice from a non-starting scheduler.
 - OpenCode H0 freezes the complete buildable fork source, archive, binary, execution
   isolation, and future Meta-Harness candidate boundary.
 - BR-10–12 semantic plan gates accept equivalent designs while rejecting plans whose

@@ -1,0 +1,33 @@
+{
+  "schema_version": "coding-eval-adjudication/v0.1",
+  "experiment_id": "tracelane-opencode-day3-v2-br11-disconnect-recovery",
+  "parent_adjudication": "tracelane-opencode-day3-v2-br10-adjudication-v4",
+  "status": "frozen-before-resume",
+  "trigger": {
+    "run_id": "day3v2-br-11-dsv4pro-r1-plan-build-operator-restart-v3",
+    "finding": "The desktop connection terminated the parent workflow after the build emitted a terminal model stop but before execution, grading, and workflow summaries were written.",
+    "classification": "external_parent_disconnect_after_model_completion"
+  },
+  "policy": {
+    "raw_trace_preserved": true,
+    "worktree_preserved": true,
+    "build_rerun": false,
+    "automatic_retries": 0,
+    "process_exit_code": "unobserved",
+    "wall_reconstruction": "cli_file_birth_to_terminal_event_mtime",
+    "frozen_v1_output_preserved": true,
+    "v2_is_post_hoc_behavioral_adjudication": true
+  },
+  "result": {
+    "terminal_stop_observed": true,
+    "frozen_v1_score": 0,
+    "adjudicated_v2_score": 20,
+    "adjudication_finding": "The real-sim NAV generator works, but scheduled_daily_run.py cannot start under the repository's Python 3.9 environment because str | None is evaluated at import time.",
+    "next_original_matrix_run": "day3v2-br-11-dsv4pro-r1-direct-build"
+  },
+  "frozen_inputs": {
+    "raw_build_cli_sha256": "7b00a2a3042a810dc1dff09e9aed02a4d5efca263604863d57fc46e4aa885929",
+    "functional_adjudicator_sha256": "0976786483cda46144529f7b9049cc8a495b413bdd8b637d244855497b58df57",
+    "resume_runner_sha256": "5bef48f21f8b57f5c6827f7f80369888c584f75c07c1b1b69ef7876164927134"
+  }
+}
