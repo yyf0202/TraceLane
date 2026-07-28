@@ -1,0 +1,12 @@
+{
+  "schema_version": "coding-eval-adjudication-amendment/v0.1",
+  "task_id": "BR-11",
+  "frozen_primary_grader_unchanged": true,
+  "supersedes_for_adjudication_only": "br11_hidden_acceptance_v5.py",
+  "reason": "V5 path injection matched every SIM global and overwrote REAL_SIM_PREFIX; its sync slice also depended on discovery behavior.",
+  "replacement_grader": "tests/fixtures/coding_tasks/br11_hidden_acceptance_v6.py",
+  "affected_run": "day3v2-br-11-glm52-r1-plan-build-gate-replay-br11-plan-v4",
+  "interrupted_attempt": "day3v2-br-11-glm52-r1-direct-build-operator-restart-br11-plan-gate-v4",
+  "replacement_suffix": "operator-restart-br11-grader-v6",
+  "automatic_retry_count": 0
+}
