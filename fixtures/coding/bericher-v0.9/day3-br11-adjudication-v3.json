@@ -1,0 +1,37 @@
+{
+  "schema_version": "coding-eval-adjudication/v0.1",
+  "experiment_id": "tracelane-opencode-day3-v2-br11-adjudication-v3",
+  "parent_adjudication": "tracelane-opencode-day3-v2-br11-disconnect-recovery",
+  "status": "frozen-before-resume",
+  "trigger": {
+    "finding": "BR-11 v2 called four prescribed helper names and rejected equivalent scheduler helper names before exercising their behavior.",
+    "operator_interrupted_attempt": "day3v2-br-11-dsv4pro-r2-direct-build",
+    "model_tokens_observed": 338030,
+    "tool_calls_observed": 20,
+    "empty_termination_record_preserved": true,
+    "orphan_process_terminated": true
+  },
+  "policy": {
+    "frozen_v1_v2_outputs_preserved": true,
+    "v3_discovers_roles_from_source_and_call_graph": true,
+    "v3_executes_scheduler_ordering_and_failure_isolation": true,
+    "v3_uses_repository_python39_runtime": true,
+    "automatic_retries": 0
+  },
+  "observed_adjudication": {
+    "run_id": "day3v2-br-11-dsv4pro-r1-direct-build",
+    "frozen_v1_score": 10,
+    "v2_score": 20,
+    "v3_score": 40,
+    "real_failures": [
+      "sync_real_fills.py cannot import under Python 3.9 because Path | None is evaluated",
+      "only one combined --skip-real-trading switch exists instead of independent sync and order switches"
+    ]
+  },
+  "replacement_attempt": "day3v2-br-11-dsv4pro-r2-direct-build-operator-restart-br11-v3",
+  "frozen_inputs": {
+    "interrupted_cli_sha256": "f3af437f94ecb05ab41540c5783c4af716baf77dd799d9e1328ec223cfd4ef1f",
+    "functional_adjudicator_sha256": "665d32f3a34f8e72e556df18002b542e20b6dd78ac5da8f40d78b1e5a12a5b98",
+    "resume_runner_sha256": "b07ffca695d7c229ee434bc9a983ec36644f9cd0f62a7790c4d9c9c4be221394"
+  }
+}

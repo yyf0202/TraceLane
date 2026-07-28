@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 V2 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v2.py"
+V3 = ROOT / "tests/fixtures/coding_tasks/br11_hidden_acceptance_v3.py"
 AMENDMENT = (
     ROOT
     / "fixtures/coding/bericher-v0.9/day3-br11-disconnect-recovery.json"
@@ -17,6 +18,7 @@ GRADER_PYTHON = Path(
 )
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import resume_day3_after_br11_v3 as v3_recovery  # noqa: E402
 import resume_day3_after_disconnect as recovery  # noqa: E402
 import run_day3_coding_eval as day3  # noqa: E402
 
@@ -170,11 +172,33 @@ with (output / f"real_order_{args.date}_{args.real_sim}.csv").open("w") as handl
 """,
         encoding="utf-8",
     )
+    (generator.parent / "sync_real_fills.py").write_text(
+        """
+from pathlib import Path
+
+def find_fills_csv(real_sim_id: str, date: str):
+    return Path(f"{real_sim_id}-{date}-filled.csv")
+
+def sync_real_fills(real_sim_id: str, fills_csv: Path, date: str):
+    return True, "ok", 1
+""",
+        encoding="utf-8",
+    )
 
 
 def _run(repository: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(GRADER_PYTHON), str(V2), str(repository)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+def _run_v3(repository: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(GRADER_PYTHON), str(V3), str(repository)],
         capture_output=True,
         text=True,
         check=False,
@@ -211,6 +235,34 @@ def test_br11_v2_rejects_plausible_python39_incompatible_scheduler(
     assert _score(result) == 20
 
 
+def test_br11_v3_accepts_equivalent_behavior_without_prescribed_names(
+    tmp_path: Path,
+) -> None:
+    _write_candidate(tmp_path)
+    result = _run_v3(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert _score(result) == 100
+
+
+def test_br11_v3_rejects_shared_real_trading_skip_switch(
+    tmp_path: Path,
+) -> None:
+    _write_candidate(tmp_path)
+    scheduler = tmp_path / "scripts/scheduled_daily_run.py"
+    source = scheduler.read_text(encoding="utf-8")
+    source = source.replace("--skip-real-sync", "--skip-real-trading")
+    source = source.replace(
+        '    parser.add_argument("--skip-real-orders", action="store_true")\n',
+        "",
+    )
+    source = source.replace("args.skip_real_sync", "args.skip_real_trading")
+    source = source.replace("args.skip_real_orders", "args.skip_real_trading")
+    scheduler.write_text(source, encoding="utf-8")
+    result = _run_v3(tmp_path)
+    assert result.returncode == 1
+    assert _score(result) == 60
+
+
 def test_disconnect_resume_starts_after_completed_replacement() -> None:
     original = day3.matrix()
     interrupted_index = next(
@@ -229,4 +281,31 @@ def test_disconnect_recovery_amendment_hashes() -> None:
     assert _sha256(V2) == frozen["functional_adjudicator_sha256"]
     assert _sha256(
         ROOT / "scripts/resume_day3_after_disconnect.py"
+    ) == frozen["resume_runner_sha256"]
+
+
+def test_br11_v3_resume_replaces_only_interrupted_r2_direct() -> None:
+    original = day3.matrix()
+    index = next(
+        index
+        for index, row in enumerate(original)
+        if row.run_slug == v3_recovery.INTERRUPTED
+    )
+    remaining = v3_recovery.remaining_matrix()
+    assert remaining[0].run_slug == (
+        v3_recovery.INTERRUPTED + "-" + v3_recovery.RESTART_SUFFIX
+    )
+    assert remaining[1:] == original[index + 1 :]
+
+
+def test_br11_v3_amendment_hashes() -> None:
+    amendment = (
+        ROOT
+        / "fixtures/coding/bericher-v0.9/day3-br11-adjudication-v3.json"
+    )
+    value = json.loads(amendment.read_text(encoding="utf-8"))
+    frozen = value["frozen_inputs"]
+    assert _sha256(V3) == frozen["functional_adjudicator_sha256"]
+    assert _sha256(
+        ROOT / "scripts/resume_day3_after_br11_v3.py"
     ) == frozen["resume_runner_sha256"]
