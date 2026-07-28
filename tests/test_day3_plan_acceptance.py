@@ -10,6 +10,10 @@ GATE_V3 = (
     Path(__file__).parent
     / "fixtures/coding_tasks/day3_plan_acceptance_v3.py"
 )
+GATE_V5 = (
+    Path(__file__).parent
+    / "fixtures/coding_tasks/day3_plan_acceptance_v5.py"
+)
 
 
 def _run(tmp_path: Path, task: str, content: str) -> subprocess.CompletedProcess[str]:
@@ -30,6 +34,19 @@ def _run_v3(
     plan.write_text(json.dumps({"content": content}), encoding="utf-8")
     return subprocess.run(
         [sys.executable, str(GATE_V3), str(plan), task],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_v5(
+    tmp_path: Path, task: str, content: str
+) -> subprocess.CompletedProcess[str]:
+    plan = tmp_path / "plan-v5.json"
+    plan.write_text(json.dumps({"content": content}), encoding="utf-8")
+    return subprocess.run(
+        [sys.executable, str(GATE_V5), str(plan), task],
         capture_output=True,
         text=True,
         check=False,
@@ -131,3 +148,36 @@ def test_br11_v3_rejects_chinese_plan_with_wrong_order(tmp_path: Path) -> None:
     """
     result = _run_v3(tmp_path, "BR-11", content)
     assert result.returncode == 1
+
+
+def test_br12_v5_accepts_failed_main_blocks_control_wording(
+    tmp_path: Path,
+) -> None:
+    content = """
+    Inside each epoch loop call model.set_epoch(epoch, args.epochs) before run_epoch.
+    Add equivalent POSIX shell and Windows batch launchers with the
+    same model, feature/static, k-fold/purge, date, batch and seed recipe. The
+    full VAE main arm uses kl-beta 0.5, lambda-recon 1 and warmup; the prior-only
+    control uses kl-beta 0 and lambda-recon 0. --main-only skips the control.
+    A failed main arm blocks the control arm. Validate with py_compile, bash -n,
+    and git diff --check.
+    """
+    result = _run_v5(tmp_path, "BR-12", content)
+    assert result.returncode == 0, result.stdout
+
+
+def test_br12_v5_still_rejects_wrong_recipe_despite_equivalent_block_wording(
+    tmp_path: Path,
+) -> None:
+    content = """
+    Inside each epoch loop call model.set_epoch(epoch, args.epochs) before run_epoch.
+    Add equivalent POSIX shell and Windows batch launchers with the
+    same model, feature/static, k-fold/purge, date, batch and seed recipe. The
+    full VAE main arm uses kl-beta 1.0, lambda-recon 1 and warmup; the control
+    leaves lambda-recon at 1. --main-only skips the control. A failed main arm
+    blocks the control arm. Validate with py_compile, bash -n, and git
+    diff --check.
+    """
+    result = _run_v5(tmp_path, "BR-12", content)
+    assert result.returncode == 1
+    assert '"earned": 75' in result.stdout

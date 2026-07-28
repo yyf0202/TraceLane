@@ -1,0 +1,14 @@
+{
+  "schema_version": "coding-eval-gate-amendment/v0.1",
+  "task_id": "BR-12",
+  "frozen_primary_gate_unchanged": true,
+  "supersedes_for_adjudication_only": "day3_plan_acceptance_v4.py",
+  "reason": "V4 rejected the equivalent control-flow statement that a failed main arm blocks the control arm.",
+  "replacement_gate": "tests/fixtures/coding_tasks/day3_plan_acceptance_v5.py",
+  "replacement_gate_sha256": "2967e79a814c7993bddbc890fdb345b733b19274b0c3e5c1e756b7c085bc2681",
+  "counterexample": "A plan that says a failed main arm blocks the control arm has the same short-circuit semantics as preventing the control from starting.",
+  "affected_run": "day3v2-br-12-k2.7code-r2-plan-build",
+  "interrupted_attempt": "day3v2-br-12-k2.7code-r2-direct-build",
+  "replacement_suffix": "operator-restart-br12-plan-gate-v5",
+  "automatic_retry_count": 0
+}
