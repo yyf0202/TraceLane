@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 V2 = ROOT / "tests/fixtures/coding_tasks/br12_hidden_acceptance_v2.py"
 V3 = ROOT / "tests/fixtures/coding_tasks/br12_hidden_acceptance_v3.py"
+V4 = ROOT / "tests/fixtures/coding_tasks/br12_hidden_acceptance_v4.py"
 
 
 def _run(repository: Path) -> subprocess.CompletedProcess[str]:
@@ -23,6 +24,15 @@ def _run(repository: Path) -> subprocess.CompletedProcess[str]:
 def _run_v3(repository: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(V3), str(repository)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def _run_v4(repository: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(V4), str(repository)],
         capture_output=True,
         text=True,
         check=False,
@@ -148,5 +158,60 @@ def test_v3_scores_kimi_r2_array_implementation_by_semantics() -> None:
     if not repository.exists():
         return
     result = _run_v3(repository)
+    assert result.returncode == 1
+    assert '"earned": 60' in result.stdout
+
+
+def test_v4_ignores_recipe_assignments_and_expands_delayed_batch_vars(
+    tmp_path: Path,
+) -> None:
+    _write_training(tmp_path)
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    common = (
+        "--model factor_vae --feature-version v2 --static-features expanded "
+        "--loss combined --target ranking --temperature 0.3 --k-folds 5 "
+        "--purge-left 3 --purge-right 65 --start-date 20150101 "
+        "--end-date 20260325 --seq-len 60 --batch-size 4096 --epochs 200 "
+        "--lr 1e-3 --weight-decay 1e-4 --seed 42 --z-dim 8"
+    )
+    (scripts / "train_factorvae_phase1.sh").write_text(
+        f"""#!/bin/bash
+set -e
+COMMON=({common})
+python src/cli/kfold_train.py kfold-train "${{COMMON[@]}}" --kl-beta 0.5 --lambda-recon 1 --kl-warmup-epochs 10 --prior-warmup-epochs 5
+if [ "$1" = "--main-only" ]; then exit 0; fi
+python src/cli/kfold_train.py kfold-train "${{COMMON[@]}}" --kl-beta 0 --lambda-recon 0 --kl-warmup-epochs 0 --prior-warmup-epochs 0
+""",
+        encoding="utf-8",
+    )
+    (scripts / "train_factorvae_phase1.bat").write_text(
+        f"""@echo off
+setlocal enabledelayedexpansion
+set "COMMON=src\\cli\\kfold_train.py kfold-train {common}"
+!PY! !COMMON! --kl-beta 0.5 --lambda-recon 1 --kl-warmup-epochs 10 --prior-warmup-epochs 5
+if errorlevel 1 goto :error
+if "%1"=="--main-only" goto :done
+!PY! !COMMON! --kl-beta 0 --lambda-recon 0 --kl-warmup-epochs 0 --prior-warmup-epochs 0
+:done
+exit /b 0
+:error
+exit /b 1
+""",
+        encoding="utf-8",
+    )
+    result = _run_v4(tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_v4_scores_glm_r2_without_crashing() -> None:
+    repository = Path(
+        "/Users/efunyang/Documents/Codex/2026-07-26/"
+        "realtime-voice-chat-3/work/"
+        "bericher-day3v2-br-12-glm52-r2-direct-build"
+    )
+    if not repository.exists():
+        return
+    result = _run_v4(repository)
     assert result.returncode == 1
     assert '"earned": 60' in result.stdout

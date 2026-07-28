@@ -1,0 +1,14 @@
+{
+  "schema_version": "coding-eval-adjudication-amendment/v0.1",
+  "task_id": "BR-12",
+  "frozen_primary_grader_unchanged": true,
+  "supersedes_for_adjudication_only": "br12_hidden_acceptance_v3.py",
+  "reason": "V3 treated recipe variable-definition lines as executable commands and did not expand Windows delayed variables such as !COMMON!.",
+  "replacement_grader": "tests/fixtures/coding_tasks/br12_hidden_acceptance_v4.py",
+  "replacement_grader_sha256": "870c98e7fe021bdbf347bc567623b7d026192934cc424a38b0321a59875ec5be",
+  "counterexample": "A batch launcher may define a COMMON recipe and invoke it through delayed expansion; the definition itself is not a training command.",
+  "affected_run": "day3v2-br-12-glm52-r2-direct-build",
+  "interrupted_attempt": "day3v2-br-12-glm52-r2-plan-build",
+  "replacement_suffix": "operator-restart-br12-grader-v4",
+  "automatic_retry_count": 0
+}
