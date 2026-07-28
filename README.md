@@ -64,5 +64,14 @@ plan→build 平均 48.3/100，direct-build 平均 56.7/100，plan 赢 3、平 3
 
 [完整记录](docs/experiments/2026-07-27-day2-results.md)
 
+### Day 2 补充：配额恢复与 gate replay
+
+对 3 个受配额影响的 BR-07 配对做了串行恢复，但 6 条 attempt 再次遇到 Ark
+流中断或无响应头，因此不作为能力分数。另将旧 gate 错拦的 6 条计划在修正 gate
+下重放 build：6 条都能启动并得到 30–80 个功能点，但都在继承剩余预算后触及
+token 上限。BR-08 的 5 个可对照 replay 中，plan 赢 1、平 3、输 1，平均差 -1 分。
+
+[完整记录](docs/experiments/2026-07-28-day2-recovery.md)
+
 样本仍少，而且存在 provider 与 gate 缺失数据。目前只能描述这些 run，不能据此声称
 某种工作流或模型普遍更好。

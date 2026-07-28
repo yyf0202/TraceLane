@@ -1,0 +1,85 @@
+{
+  "schema_version": "coding-eval-recovery/v0.1",
+  "frozen_at": "2026-07-28",
+  "parent_experiment": "day2-bericher-three-model-v0.1",
+  "purpose": "Recover three Ark-quota-affected BR-07 v2 pairs and replay builds for six plans rejected by superseded semantic gates.",
+  "execution_rules": {
+    "serial": true,
+    "automatic_retries": false,
+    "preserve_parent_attempts": true,
+    "same_provider_within_pair": true,
+    "provider": "ark",
+    "endpoint": "https://ark.cn-beijing.volces.com/api/coding/v3"
+  },
+  "recovery_pairs": [
+    {
+      "model": "kimi-k2.7-code",
+      "repeat": 2,
+      "order": ["plan-build", "direct-build"],
+      "attempt_ids": [
+        "day2-br-07-v2-k2.7code-r2-plan-build-recovery1",
+        "day2-br-07-v2-k2.7code-r2-direct-build-recovery1"
+      ]
+    },
+    {
+      "model": "glm-5.2",
+      "repeat": 1,
+      "order": ["plan-build", "direct-build"],
+      "attempt_ids": [
+        "day2-br-07-v2-glm52-r1-plan-build-recovery1",
+        "day2-br-07-v2-glm52-r1-direct-build-recovery1"
+      ]
+    },
+    {
+      "model": "glm-5.2",
+      "repeat": 2,
+      "order": ["direct-build", "plan-build"],
+      "attempt_ids": [
+        "day2-br-07-v2-glm52-r2-direct-build-recovery1",
+        "day2-br-07-v2-glm52-r2-plan-build-recovery1"
+      ]
+    }
+  ],
+  "gate_replays": [
+    {
+      "attempt_id": "day2-br-06-v2-k2.7code-r1-plan-build-gate-replay-v2",
+      "source_attempt_id": "day2-br-06-v2-k2.7code-r1-plan-build",
+      "corrected_gate_version": 2
+    },
+    {
+      "attempt_id": "day2-br-08-k2.7code-r1-plan-build-gate-replay-v3",
+      "source_attempt_id": "day2-br-08-k2.7code-r1-plan-build",
+      "corrected_gate_version": 3
+    },
+    {
+      "attempt_id": "day2-br-08-glm52-r1-plan-build-gate-replay-v3",
+      "source_attempt_id": "day2-br-08-glm52-r1-plan-build",
+      "corrected_gate_version": 3
+    },
+    {
+      "attempt_id": "day2-br-08-glm52-r2-plan-build-gate-replay-v3",
+      "source_attempt_id": "day2-br-08-glm52-r2-plan-build",
+      "corrected_gate_version": 3
+    },
+    {
+      "attempt_id": "day2-br-08-dsv4pro-r1-plan-build-gate-replay-v3",
+      "source_attempt_id": "day2-br-08-dsv4pro-r1-plan-build",
+      "corrected_gate_version": 3
+    },
+    {
+      "attempt_id": "day2-br-08-dsv4pro-r2-plan-build-gate-replay-v3",
+      "source_attempt_id": "day2-br-08-dsv4pro-r2-plan-build",
+      "corrected_gate_version": 3
+    }
+  ],
+  "budget_policy": {
+    "recovery": "Use the frozen task budget independently for each new attempt.",
+    "gate_replay": "Reuse the original plan artifact and subtract its measured wall time, tool calls, and model tokens from the frozen plan-to-build total before starting the build."
+  },
+  "reporting_layers": [
+    "original_preregistered_36",
+    "quota_recovery_complete_pairs",
+    "corrected_gate_build_replays"
+  ],
+  "claim_scope": "Descriptive chain and gate diagnostics only; no statistical-significance claim and no pooling across providers."
+}

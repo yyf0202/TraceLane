@@ -49,6 +49,7 @@ class AttemptSpec:
     model: str
     repeat: int
     workflow: str
+    run_suffix: str = ""
 
     @property
     def model_slug(self) -> str:
@@ -61,10 +62,11 @@ class AttemptSpec:
     @property
     def run_slug(self) -> str:
         version = f"-{self.task.run_version}" if self.task.run_version else ""
-        return (
+        base = (
             f"day2-{self.task.short_id.lower()}{version}-"
             f"{self.model_slug}-r{self.repeat}-{self.workflow}"
         )
+        return f"{base}-{self.run_suffix}" if self.run_suffix else base
 
 
 TASKS = (
@@ -228,7 +230,7 @@ def _grade(spec: AttemptSpec, worktree: Path, raw: Path) -> None:
     )
 
 
-def execute(spec: AttemptSpec) -> None:
+def execute(spec: AttemptSpec, *, plan_gate: Path = PLAN_GATE) -> None:
     task = load_coding_task(json.loads(spec.task.manifest.read_text(encoding="utf-8")))
     raw = RAW_ROOT / spec.run_slug
     if raw.exists():
@@ -300,7 +302,7 @@ def execute(spec: AttemptSpec) -> None:
         _run(
             [
                 str(PYTHON),
-                str(PLAN_GATE),
+                str(plan_gate),
                 str(handoff_dir / "plan.json"),
                 spec.task.short_id,
             ],
